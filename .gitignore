@@ -1,0 +1,10 @@
+# Build output
+Midi_Fighter_Twister_64_detent/build/
+
+# Atmel Studio generated build directories
+Midi_Fighter_Twister_64_detent/Debug/
+Midi_Fighter_Twister_64_detent/Release/
+
+# OS files
+.DS_Store
+.trash/
