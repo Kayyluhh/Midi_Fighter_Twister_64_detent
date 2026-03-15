@@ -46,7 +46,7 @@
 		
 	/* Typedefs: */
 		
-		#define GLOBAL_TABLE_SIZE 12
+		#define GLOBAL_TABLE_SIZE 15
 		// The global table holds the Twister global settings
 		typedef union {
 			struct {
@@ -63,6 +63,9 @@
 				uint8_t superEnd;
 				uint8_t rgb_brightness;
 				uint8_t ind_brightness;
+				uint8_t soft_takeover;
+				uint8_t bank_wrap_mode;
+				uint8_t shift_page_latch;
 			};
 			uint8_t bytes[GLOBAL_TABLE_SIZE];
 		} global_tvtable_t;	
@@ -72,6 +75,9 @@
 		uint8_t global_super_knob_end;
 		uint8_t global_rgb_brightness;
 		uint8_t global_ind_brightness;
+		uint8_t global_soft_takeover;
+		uint8_t global_bank_wrap_mode;
+		uint8_t global_shift_page_latch;
 		uint8_t midi_system_channel;
 	/* Function Prototypes: */
 	

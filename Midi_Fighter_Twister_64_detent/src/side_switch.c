@@ -25,8 +25,13 @@
 **/
 #include <side_switch.h>
 
+#define UI_NAV_CHANNEL_CH2 1
+#define UI_NAV_CC_OPT 42
+#define UI_NAV_CC_EDIT 43
+
 // Holds all configurable side switch settings
 static side_sw_settings_t side_sw_cfg;
+static bool fine_adjust_hold_active = false;
 
 // Holds toggle state for switch if configured for MIDI toggle action
 static uint8_t side_switch_toggle_state[NUM_BANKS];
@@ -50,6 +55,12 @@ void side_switch_init(void)
 	for(uint8_t i=0;i<NUM_BANKS;++i){
 		side_switch_toggle_state[i] = 0x00;
 	}
+	fine_adjust_hold_active = false;
+}
+
+bool side_switch_fine_adjust_active(void)
+{
+	return fine_adjust_hold_active;
 }
 
 /**
@@ -172,28 +183,54 @@ void do_side_switch_function(uint8_t switch_num, switch_event_t state)
 			}
 		} break;
 		case SHIFT_PAGE_1:{
-			// The switch activates shift page 1 so enable shift page 1
-			if (state == SW_DOWN) {
-				set_op_mode(shift1);
-			} else if (state == SW_UP) {
-				refresh_display();
-				set_op_mode(normal);
+			// The switch activates shift page 1.
+			if (global_shift_page_latch) {
+				if (state == SW_DOWN) {
+					if (get_op_mode() == shift1) {
+						refresh_display();
+						set_op_mode(normal);
+					} else {
+						set_op_mode(shift1);
+					}
+				}
+			} else {
+				if (state == SW_DOWN) {
+					set_op_mode(shift1);
+				} else if (state == SW_UP) {
+					refresh_display();
+					set_op_mode(normal);
+				}
 			}
 		} break;
 		case SHIFT_PAGE_2:{
-			// The switch activates shift page 2 so enable shift page 2
-			if (state == SW_DOWN) {
-				set_op_mode(shift2);
-			} else if (state == SW_UP) {
-				refresh_display();
-				set_op_mode(normal);
+			// The switch activates shift page 2.
+			if (global_shift_page_latch) {
+				if (state == SW_DOWN) {
+					if (get_op_mode() == shift2) {
+						refresh_display();
+						set_op_mode(normal);
+					} else {
+						set_op_mode(shift2);
+					}
+				}
+			} else {
+				if (state == SW_DOWN) {
+					set_op_mode(shift2);
+				} else if (state == SW_UP) {
+					refresh_display();
+					set_op_mode(normal);
+				}
 			}
 		} break;
 		case GLOBAL_BANK_UP:{
 			// The switch increments the global bank setting
-			if((state == SW_DOWN) && (current_encoder_bank() < (NUM_BANKS-1))){
+			if (state == SW_DOWN) {
 				// Send bank change MIDI output
-				uint8_t next_bank = (current_encoder_bank()+1 >= NUM_BANKS) ? NUM_BANKS-1 : current_encoder_bank()+1;
+				uint8_t current_bank = current_encoder_bank();
+				if ((current_bank >= (NUM_BANKS - 1)) && !global_bank_wrap_mode) {
+					break;
+				}
+				uint8_t next_bank = (current_bank + 1 >= NUM_BANKS) ? 0 : (current_bank + 1);
 				midi_stream_raw_cc(midi_system_channel, current_encoder_bank(), 0);
 				change_encoder_bank(next_bank);
 				midi_stream_raw_cc(midi_system_channel, current_encoder_bank(), 127);
@@ -202,9 +239,13 @@ void do_side_switch_function(uint8_t switch_num, switch_event_t state)
 		} break;
 		case GLOBAL_BANK_DOWN:{
 			// The switch decrements the global bank setting
-			if((state == SW_DOWN) && (current_encoder_bank() > 0)){
+			if (state == SW_DOWN) {
 				// Send bank change MIDI output
-				uint8_t next_bank = (current_encoder_bank()-1 >= NUM_BANKS) ? 0 : current_encoder_bank()-1;
+				uint8_t current_bank = current_encoder_bank();
+				if ((current_bank == 0) && !global_bank_wrap_mode) {
+					break;
+				}
+				uint8_t next_bank = (current_bank == 0) ? (NUM_BANKS - 1) : (current_bank - 1);
 				midi_stream_raw_cc(midi_system_channel, current_encoder_bank(), 0);
 				change_encoder_bank(next_bank);
 				midi_stream_raw_cc(midi_system_channel, current_encoder_bank(), 127);
@@ -260,5 +301,26 @@ void do_side_switch_function(uint8_t switch_num, switch_event_t state)
 			}
 		}
 		break;
+		case UI_OPT_CH2:{
+			if(state == SW_DOWN){
+				midi_stream_raw_cc(UI_NAV_CHANNEL_CH2, UI_NAV_CC_OPT, 127);
+			} else if (state == SW_UP) {
+				midi_stream_raw_cc(UI_NAV_CHANNEL_CH2, UI_NAV_CC_OPT, 0);
+			}
+		} break;
+		case UI_EDIT_CH2:{
+			if(state == SW_DOWN){
+				midi_stream_raw_cc(UI_NAV_CHANNEL_CH2, UI_NAV_CC_EDIT, 127);
+			} else if (state == SW_UP) {
+				midi_stream_raw_cc(UI_NAV_CHANNEL_CH2, UI_NAV_CC_EDIT, 0);
+			}
+		} break;
+		case FINE_ADJUST_HOLD:{
+			if (state == SW_UP) {
+				fine_adjust_hold_active = false;
+			} else {
+				fine_adjust_hold_active = true;
+			}
+		} break;
 	}
 }

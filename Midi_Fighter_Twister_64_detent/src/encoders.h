@@ -184,5 +184,7 @@
 		bool encoder_is_in_deadzone(int16_t value);
 		bool encoder_is_in_shift_state(uint8_t bank, uint8_t encoder);
 		bool encoder_midi_type_is_relative(uint8_t encoder);
+		void encoders_set_soft_takeover_enabled(bool enabled);
+		bool encoders_get_soft_takeover_enabled(void);
 
 #endif /* ENCODERS_H_ */ 

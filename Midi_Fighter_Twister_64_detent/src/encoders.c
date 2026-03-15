@@ -83,6 +83,9 @@ int16_t  raw_encoder_value[VIRTUAL_ENCODERS]; // !Summer2016Update: Expanded to 
 static uint8_t encoder_bank = 0;
 static int8_t g_detent_size;
 static int8_t g_dead_zone_size;
+static bool soft_takeover_enabled = true;
+static uint8_t soft_takeover_target[VIRTUAL_ENCODERS];
+static bool soft_takeover_armed[VIRTUAL_ENCODERS];
 //static encoder_config_t encoder_settings[PHYSICAL_ENCODERS];
 encoder_config_t encoder_settings[BANKED_ENCODERS];
 //static encoder_config_t encoder_settings_transfer_buffer[1];
@@ -108,6 +111,7 @@ void transfer_encoder_values_to_other_banks(uint8_t current_bank);
 bool animation_is_encoder_indicator(uint8_t animation_value);
 bool animation_is_switch_rgb(uint8_t animation_value);
 bool animation_buffer_conflict_exists(uint8_t bank, uint8_t encoder);
+bool pickup_target_crossed(uint8_t prev, uint8_t curr, uint8_t target);
 
 #if VELOCITY_CALC_METHOD > VELOCITY_CALC_M_NONE 
 	uint16_t convert_ticks_per_scan_to_value_multiplier(uint8_t tick_count, uint16_t cycles_count);
@@ -182,6 +186,26 @@ void transfer_encoder_values_to_other_banks(uint8_t current_bank){
 	}
 }
 
+bool pickup_target_crossed(uint8_t prev, uint8_t curr, uint8_t target) {
+	if (prev <= curr) {
+		return (target >= prev) && (target <= curr);
+	}
+	return (target <= prev) && (target >= curr);
+}
+
+void encoders_set_soft_takeover_enabled(bool enabled) {
+	soft_takeover_enabled = enabled;
+	if (!enabled) {
+		for (uint8_t i = 0; i < VIRTUAL_ENCODERS; ++i) {
+			soft_takeover_armed[i] = false;
+		}
+	}
+}
+
+bool encoders_get_soft_takeover_enabled(void) {
+	return soft_takeover_enabled;
+}
+
 // !Summer2016Update: Removed input_map in favor of expanding encoder_settings table
 //~ void sync_input_map_to_output_map(uint8_t encoder_id)  // Accepted Encoder IDs are: 0-63 (16-encoders per each of the 4-banks)
 //~ {
@@ -243,6 +267,10 @@ void encoders_init(void)
 			raw_encoder_value[i] = 0;
 			raw_encoder_value[i+BANKED_ENCODERS] = 0; // Also set the value of the 'shifted encoder')
 		}
+		soft_takeover_target[i] = scale_encoder_value(raw_encoder_value[i]);
+		soft_takeover_target[i+BANKED_ENCODERS] = scale_encoder_value(raw_encoder_value[i+BANKED_ENCODERS]);
+		soft_takeover_armed[i] = false;
+		soft_takeover_armed[i+BANKED_ENCODERS] = false;
 	}
 	
 	// Initialize MIDI input map for all encoders	
@@ -253,7 +281,7 @@ void encoders_init(void)
 	//~ }
 		
 	// Set the de-tent size	TODO THIS SHOULD BE A SETTING
-	g_detent_size = 8;	
+	g_detent_size = 5;	
 	g_dead_zone_size = 2;	
 }
 
@@ -434,6 +462,50 @@ void save_encoder_config(uint8_t bank, uint8_t encoder, encoder_config_t *cfg_pt
 **/
 void factory_reset_encoder_config(void)
 {
+	// Custom default profile for the 16 physical knobs (applied to each bank).
+	// Values are 7-bit MIDI CC numbers.
+	const uint8_t default_knob_cc_map[PHYSICAL_ENCODERS] = {
+		1, 33, 2, 19,
+		15, 16, 17, 18,
+		23, 24, 25, 26,
+		31, 32, 35, 40
+	};
+
+	const uint8_t default_knob_encoder_channel_map[PHYSICAL_ENCODERS] = {
+		DEF_ENC_CH, DEF_ENC_CH, DEF_ENC_CH, DEF_ENC_CH,
+		DEF_ENC_CH, DEF_ENC_CH, DEF_ENC_CH, DEF_ENC_CH,
+		DEF_ENC_CH, DEF_ENC_CH, DEF_ENC_CH, DEF_ENC_CH,
+		DEF_ENC_CH, DEF_ENC_CH, DEF_ENC_CH, 1
+	};
+
+	const uint8_t default_knob_encoder_type_map[PHYSICAL_ENCODERS] = {
+		SEND_CC, SEND_CC, SEND_CC, SEND_CC,
+		SEND_CC, SEND_CC, SEND_CC, SEND_CC,
+		SEND_CC, SEND_CC, SEND_CC, SEND_CC,
+		SEND_CC, SEND_CC, SEND_CC, SEND_REL_ENC
+	};
+
+	const uint8_t default_knob_switch_cc_map[PHYSICAL_ENCODERS] = {
+		0, 1, 2, 3,
+		4, 5, 6, 7,
+		8, 9, 10, 11,
+		12, 13, 14, 41
+	};
+
+	const uint8_t default_knob_indicator_map[PHYSICAL_ENCODERS] = {
+		BLENDED_DOT, BLENDED_DOT, BAR,         BLENDED_BAR,
+		BLENDED_BAR, BLENDED_BAR, BLENDED_BAR, BLENDED_BAR,
+		BLENDED_BAR, BLENDED_BAR, BLENDED_BAR, BLENDED_BAR,
+		BLENDED_BAR, BLENDED_BAR, BLENDED_BAR, BAR
+	};
+
+	const uint8_t default_knob_detent_map[PHYSICAL_ENCODERS] = {
+		1, 1, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 0
+	};
+
 	// Create a table of the default settings common to all encoders
 	encoder_config_t enc_default;
 			
@@ -518,12 +590,30 @@ void factory_reset_encoder_config(void)
 		/* We now save the buffer to EEPROM, then increment the settings 
 		   which are unique to each encoder ie MIDI number/pitch and repeat 
 		   until we have saved all 64 encoders data */
+
+		uint8_t bank = i >> 2;
+		uint8_t bank_page = i & 0x03;
 		
 		// !Summer2016Update: Modify Default On/Off colors by bank rather than per encoder.
-		uint8_t color_index = i >> 2;
+		uint8_t color_index = bank;
 		uint8_t active_color = active_colors[color_index];  // Changes with each Bank
 		uint8_t inactive_color = inactive_colors[color_index]; // Changes with each bank
 		for(uint8_t j=0;j<4;++j){  // For each Data Page (Corresponds to 1 - Horizontal Row of Encoders)
+			uint8_t physical_encoder = (bank_page * 4) + j;
+			UNUSED(bank);
+
+			// Apply custom default mapping and visual behavior.
+			page_buffer[(j*8)+0] = (page_buffer[(j*8)+0] & 0x0F) |
+								  ((default_knob_encoder_channel_map[physical_encoder] & 0x0F) << 4);
+			page_buffer[(j*8)+1] = default_knob_switch_cc_map[physical_encoder] & 0x7F;
+			page_buffer[(j*8)+7] = (page_buffer[(j*8)+7] & 0x80) | (default_knob_cc_map[physical_encoder] & 0x7F);
+			page_buffer[(j*8)+4] = (default_knob_detent_map[physical_encoder] ? 0x80 : 0x00) |
+									  (page_buffer[(j*8)+4] & 0x7F);
+			page_buffer[(j*8)+5] = (page_buffer[(j*8)+5] & 0xFC) | (default_knob_indicator_map[physical_encoder] & 0x03);
+			page_buffer[(j*8)+6] = (page_buffer[(j*8)+6] & 0xF8) | (default_knob_encoder_type_map[physical_encoder] & 0x07);
+			page_buffer[(j*8)+6] = (page_buffer[(j*8)+6] & 0x0F) |
+								  ((default_knob_encoder_channel_map[physical_encoder] & 0x0F) << 4);
+
 			page_buffer[(j*8)+2] = active_color; // Adjust Active Color  (All Rows should be the same for THIS BANK)
 			page_buffer[(j*8)+3] = inactive_color; // Adjust Inactive Color (ALL Rows should be the same for THIS BANK)
 			// 8 = Settings Size
@@ -724,7 +814,8 @@ bool process_encoder_input_rotary_detent(uint8_t i, uint8_t virtual_encoder_id, 
 	// new_value will be 1 or -1 if it gets here(though technically it could hold values higher)
 	uint8_t output_value;// = 64 + new_value;	// Relative: Bin Offset
 	// Case A: Relative Encoder Fine Adjustments
-	if (encoder_settings[banked_encoder_id].switch_action_type == ENC_FINE_ADJUST && get_enc_switch_state() & bit) { // !Summer2016Update: Relative Encoder Fine Adjustment Added
+	if ((encoder_settings[banked_encoder_id].switch_action_type == ENC_FINE_ADJUST && (get_enc_switch_state() & bit)) ||
+		side_switch_fine_adjust_active()) { // !Summer2016Update: Relative Encoder Fine Adjustment Added
 		static int16_t relative_fine_value[PHYSICAL_ENCODERS] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};  // Counter
 		relative_fine_value[i] += new_value;
 		output_value = 64;
@@ -782,7 +873,9 @@ bool process_encoder_input_rotary_detent(uint8_t i, uint8_t virtual_encoder_id, 
   bool process_encoder_input_rotary_absolute(uint8_t i, uint8_t virtual_encoder_id, uint8_t banked_encoder_id, int8_t new_value, uint16_t bit, uint16_t cycle_count) {
 	uint16_t base_multiplier;
 	int16_t scaled_value;
-	bool fine_adj = (encoder_settings[banked_encoder_id].switch_action_type == ENC_FINE_ADJUST && get_enc_switch_state() & bit);
+	int16_t prev_raw = raw_encoder_value[virtual_encoder_id];
+	bool fine_adj = ((encoder_settings[banked_encoder_id].switch_action_type == ENC_FINE_ADJUST && (get_enc_switch_state() & bit)) ||
+		side_switch_fine_adjust_active());
 	
 	// Calculate Value adjustment
 	if(encoder_settings[banked_encoder_id].movement == VELOCITY_SENSITIVE_ENC) { // Velocity Sensitive
@@ -809,7 +902,22 @@ bool process_encoder_input_rotary_detent(uint8_t i, uint8_t virtual_encoder_id, 
 	raw_encoder_value[virtual_encoder_id] += scaled_value;
 	raw_encoder_value[virtual_encoder_id] = clamp_encoder_raw_value(raw_encoder_value[virtual_encoder_id]);
 	// Translate the raw value into a MIDI value, send & save the new value
+	uint8_t prev_control_change_value = scale_encoder_value(prev_raw);
 	uint8_t control_change_value = scale_encoder_value(raw_encoder_value[virtual_encoder_id]);
+	if (soft_takeover_enabled &&
+		soft_takeover_armed[virtual_encoder_id] &&
+		encoder_settings[banked_encoder_id].encoder_midi_type != SEND_REL_ENC &&
+		encoder_settings[banked_encoder_id].encoder_midi_type != SEND_REL_ENC_MOUSE_EMU_DRAG &&
+		encoder_settings[banked_encoder_id].encoder_midi_type != SEND_REL_ENC_MOUSE_EMU_SCROLL) {
+		uint8_t target = soft_takeover_target[virtual_encoder_id];
+		if (pickup_target_crossed(prev_control_change_value, control_change_value, target)) {
+			raw_encoder_value[virtual_encoder_id] = ((int16_t)target) * 100;
+			control_change_value = target;
+			soft_takeover_armed[virtual_encoder_id] = false;
+		} else {
+			return true;
+		}
+	}
 	//send_element_midi(SWITCH, i, control_change_value, true);
 	uint8_t this_bank = encoder_bank;// banked_encoder_id >> 4; // !review !test this_bank
 	bool shifted = encoder_is_in_shift_state(this_bank, i);
@@ -820,9 +928,11 @@ bool process_encoder_input_rotary_detent(uint8_t i, uint8_t virtual_encoder_id, 
 #else
   bool process_encoder_input_rotary_absolute(uint8_t i, uint8_t virtual_encoder_id, uint8_t banked_encoder_id, int8_t new_value, uint16_t bit) {
 	int16_t scaled_value;
+	int16_t prev_raw = raw_encoder_value[virtual_encoder_id];
 		
-	if (encoder_settings[banked_encoder_id].switch_action_type == ENC_FINE_ADJUST &&
-		get_enc_switch_state() & bit) {
+	if ((encoder_settings[banked_encoder_id].switch_action_type == ENC_FINE_ADJUST &&
+		(get_enc_switch_state() & bit)) ||
+		side_switch_fine_adjust_active()) {
 		// Fine adjust sensitivity, 1 pulse = 1/4 a CC step	
 		scaled_value = new_value*ENCODER_VALUE_SCALAR_DIRECT_FINE; 
 		
@@ -839,7 +949,22 @@ bool process_encoder_input_rotary_detent(uint8_t i, uint8_t virtual_encoder_id, 
 	raw_encoder_value[virtual_encoder_id] += scaled_value;
 	raw_encoder_value[virtual_encoder_id] = clamp_encoder_raw_value(raw_encoder_value[virtual_encoder_id]);
 	// Translate the raw value into a MIDI value, send & save the new value 	
+	uint8_t prev_control_change_value = scale_encoder_value(prev_raw);
 	uint8_t control_change_value = scale_encoder_value(raw_encoder_value[virtual_encoder_id]);
+	if (soft_takeover_enabled &&
+		soft_takeover_armed[virtual_encoder_id] &&
+		encoder_settings[banked_encoder_id].encoder_midi_type != SEND_REL_ENC &&
+		encoder_settings[banked_encoder_id].encoder_midi_type != SEND_REL_ENC_MOUSE_EMU_DRAG &&
+		encoder_settings[banked_encoder_id].encoder_midi_type != SEND_REL_ENC_MOUSE_EMU_SCROLL) {
+		uint8_t target = soft_takeover_target[virtual_encoder_id];
+		if (pickup_target_crossed(prev_control_change_value, control_change_value, target)) {
+			raw_encoder_value[virtual_encoder_id] = ((int16_t)target) * 100;
+			control_change_value = target;
+			soft_takeover_armed[virtual_encoder_id] = false;
+		} else {
+			return true;
+		}
+	}
 	//send_element_midi(SWITCH, i, control_change_value, true);
 	uint8_t this_bank = encoder_bank;// banked_encoder_id >> 4; // !review !test this_bank
 	bool shifted = encoder_is_in_shift_state(this_bank, i);
@@ -1410,8 +1535,19 @@ void process_indicator_update(uint8_t idx, uint8_t value, uint8_t rx_msg_shifted
 	// Update the raw value if bank is active, and the encoder is not currently moving
 	if (bank == current_encoder_bank()) {
 		if ( !encoder_is_active(encoder)  ||  encoder_midi_type_is_relative(encoder) ) {
-			int16_t raw_value= ((uint16_t)value)*100;
-			raw_encoder_value[virtual_encoder_id] = raw_value;
+			if (soft_takeover_enabled &&
+				!rx_msg_shifted_mapping &&
+				encoder_settings[idx].encoder_midi_type != SEND_REL_ENC &&
+				encoder_settings[idx].encoder_midi_type != SEND_REL_ENC_MOUSE_EMU_DRAG &&
+				encoder_settings[idx].encoder_midi_type != SEND_REL_ENC_MOUSE_EMU_SCROLL) {
+				soft_takeover_target[virtual_encoder_id] = value;
+				soft_takeover_armed[virtual_encoder_id] = true;
+			} else {
+				int16_t raw_value= ((uint16_t)value)*100;
+				raw_encoder_value[virtual_encoder_id] = raw_value;
+				soft_takeover_target[virtual_encoder_id] = value;
+				soft_takeover_armed[virtual_encoder_id] = false;
+			}
 			if (current_shift_state == rx_msg_shifted_mapping) { // If Value is currently on display, update the display
 				indicator_value_buffer[bank][encoder] = value;
 			}
@@ -1420,6 +1556,8 @@ void process_indicator_update(uint8_t idx, uint8_t value, uint8_t rx_msg_shifted
 	     // otherwise update the value buffer
 		int16_t raw_value= ((uint16_t)value)*100;
 		raw_encoder_value[virtual_encoder_id] = raw_value;
+		soft_takeover_target[virtual_encoder_id] = value;
+		soft_takeover_armed[virtual_encoder_id] = false;
 		if (current_shift_state == rx_msg_shifted_mapping) { // If Value is currently on display, update the display
 			indicator_value_buffer[bank][encoder] = value;
 		}

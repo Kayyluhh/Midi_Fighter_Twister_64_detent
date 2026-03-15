@@ -50,6 +50,9 @@
 			GLOBAL_BANK_3,
 			GLOBAL_BANK_4,
 			CYCLE_BANK,
+			UI_OPT_CH2,
+			UI_EDIT_CH2,
+			FINE_ADJUST_HOLD,
 		} side_sw_action_t;
 	
 		// Structure which hold side switch settings
@@ -77,6 +80,7 @@
 		void side_switch_config(side_sw_settings_t *settings);
 		side_sw_settings_t* get_side_switch_config(void);
 		void process_side_switch_input(void);
+		bool side_switch_fine_adjust_active(void);
 		
 		void set_op_mode(op_mode_t new_mode);
 		op_mode_t get_op_mode(void);

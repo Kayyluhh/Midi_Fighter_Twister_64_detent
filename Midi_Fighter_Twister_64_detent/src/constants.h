@@ -30,9 +30,11 @@
 //#define DEVICE_VERSION_DAY		0x13
 //#define DEVICE_VERSION  		((DEVICE_VERSION_YEAR << 16) | (DEVICE_VERSION_MONTH << 8) | DEVICE_VERSION_DAY)
 
-#define DEVICE_VERSION_YEAR 	0x2023
-#define DEVICE_VERSION_MONTH	0x0C
-#define DEVICE_VERSION_DAY		0x11
+#define FW_VERSION_MAJOR        0x01
+#define FW_VERSION_MINOR        0x01
+#define DEVICE_VERSION_YEAR 	0x0001
+#define DEVICE_VERSION_MONTH	0x01
+#define DEVICE_VERSION_DAY		0x01
 #define DEVICE_VERSION  		((DEVICE_VERSION_YEAR << 23) | (DEVICE_VERSION_MONTH << 6) | DEVICE_VERSION_DAY)
 
 // 14bit device family ID, LSB first
@@ -86,7 +88,7 @@
 
 // EEPROM Constants -------------------------------------------------------
 
-#define EEPROM_LAYOUT			         7	//The EEPROM layout version
+#define EEPROM_LAYOUT			         8	//The EEPROM layout version
 
 // EEPROM Memory Locations for configurable settings
 
@@ -105,6 +107,9 @@
 #define EE_SUPER_KNOB_END			0x000B  //Super Knob Secondary CC start point
 #define EE_RGB_BRIGHTNESS			0x000C  //Global brightness setting for RGB
 #define EE_IND_BRIGHTNESS           0x000D  //Gobal brightness setting for indicators
+#define EE_SOFT_TAKEOVER            0x000E  //Enable soft takeover for absolute encoders
+#define EE_BANK_WRAP_MODE           0x000F  //Wrap bank up/down at edges
+#define EE_SHIFT_PAGE_LATCH         0x0010  //Latch shift pages instead of hold-only
 
 #define EE_ENC_SETTING_START		0x0020  //Start of encoder settings
 #define EE_HAS_DETENT_OFFSET		0x0000  //Has Detent setting offset			    //
@@ -136,14 +141,17 @@
 #define DEF_SIDE_SW_1_FUNC		CC_HOLD_SS
 #define DEF_SIDE_SW_2_FUNC      GLOBAL_BANK_DOWN
 #define DEF_SIDE_SW_3_FUNC      CC_HOLD_SS
-#define DEF_SIDE_SW_4_FUNC      CC_HOLD_SS
-#define DEF_SIDE_SW_5_FUNC		GLOBAL_BANK_UP
-#define DEF_SIDE_SW_6_FUNC      CC_HOLD_SS
+#define DEF_SIDE_SW_4_FUNC      FINE_ADJUST_HOLD
+#define DEF_SIDE_SW_5_FUNC		UI_OPT_CH2
+#define DEF_SIDE_SW_6_FUNC      UI_EDIT_CH2
 
 #define DEF_SUPER_START_VALUE    63
 #define DEF_SUPER_END_VALUE     127
 #define DEF_RGB_BRIGHTNESS	    127
 #define DEF_IND_BRIGHTNESS	    127
+#define DEF_SOFT_TAKEOVER        true
+#define DEF_BANK_WRAP_MODE       true
+#define DEF_SHIFT_PAGE_LATCH     false
 
 //Encoder
 #define DEF_ENC_DETENT          false

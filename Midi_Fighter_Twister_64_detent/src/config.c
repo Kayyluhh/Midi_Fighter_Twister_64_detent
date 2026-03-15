@@ -73,6 +73,9 @@ static void sysExCmdPushConfig (uint8_t length, uint8_t* buffer)
 	eeprom_write(EE_SUPER_KNOB_END, config.superEnd);	
 	eeprom_write(EE_RGB_BRIGHTNESS, config.rgb_brightness);
 	eeprom_write(EE_IND_BRIGHTNESS, config.ind_brightness);
+	eeprom_write(EE_SOFT_TAKEOVER, config.soft_takeover ? 1 : 0);
+	eeprom_write(EE_BANK_WRAP_MODE, config.bank_wrap_mode ? 1 : 0);
+	eeprom_write(EE_SHIFT_PAGE_LATCH, config.shift_page_latch ? 1 : 0);
 
 	setting_confirmation_animation(0x00FF00);
 		
@@ -112,6 +115,9 @@ void send_config_data (void)
 								9 , global_super_knob_end,
 								31, global_rgb_brightness,
 								32, global_ind_brightness,
+								33, global_soft_takeover,
+								34, global_bank_wrap_mode,
+								35, global_shift_page_latch,
                                 0xf7};
 								
     midi_stream_sysex(sizeof(payload), payload);
@@ -370,6 +376,10 @@ void load_config(void)
 	global_super_knob_end      = eeprom_read(EE_SUPER_KNOB_END);
 	global_rgb_brightness      = eeprom_read(EE_RGB_BRIGHTNESS);
 	global_ind_brightness      = eeprom_read(EE_IND_BRIGHTNESS);
+	global_soft_takeover       = eeprom_read(EE_SOFT_TAKEOVER) ? 1 : 0;
+	global_bank_wrap_mode      = eeprom_read(EE_BANK_WRAP_MODE) ? 1 : 0;
+	global_shift_page_latch    = eeprom_read(EE_SHIFT_PAGE_LATCH) ? 1 : 0;
+	encoders_set_soft_takeover_enabled(global_soft_takeover);
 	
 	side_switch_config(&side_sw_cfg);
 	
@@ -401,6 +411,9 @@ void config_factory_reset(void)
 	eeprom_write(EE_SUPER_KNOB_END, DEF_SUPER_END_VALUE);
 	eeprom_write(EE_RGB_BRIGHTNESS, DEF_RGB_BRIGHTNESS);
 	eeprom_write(EE_IND_BRIGHTNESS, DEF_IND_BRIGHTNESS);
+	eeprom_write(EE_SOFT_TAKEOVER, DEF_SOFT_TAKEOVER ? 1 : 0);
+	eeprom_write(EE_BANK_WRAP_MODE, DEF_BANK_WRAP_MODE ? 1 : 0);
+	eeprom_write(EE_SHIFT_PAGE_LATCH, DEF_SHIFT_PAGE_LATCH ? 1 : 0);
 	
 	cpu_irq_enable();
 	
