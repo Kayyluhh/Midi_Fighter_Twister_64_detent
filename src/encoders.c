@@ -34,8 +34,8 @@
 #include <encoders.h>
 
 // Constants
-const uint16_t encoder_detent_limit_low = 6240; // 6240 - ok for all modes (6250 causes high res mode to hit '64' on the way up)
-const uint16_t encoder_detent_limit_high = 6450; // 6450 - ok for all modes, (note: scale_encoder_value adds 50 to these "raw" values in velocity calc)
+const uint16_t encoder_detent_limit_low = 6290; // 6240 - ok for all modes (6250 causes high res mode to hit '64' on the way up)
+const uint16_t encoder_detent_limit_high = 6500; // 6450 - ok for all modes, (note: scale_encoder_value adds 50 to these "raw" values in velocity calc)
 
 // Locals
 
@@ -237,8 +237,8 @@ void encoders_init(void)
 	// Initialize Per-Banked Encoder related variables 
 	for (uint8_t i = 0; i<BANKED_ENCODERS;++i){ 
 		if (encoder_settings[i].has_detent) {
-			raw_encoder_value[i] = 6300;
-			raw_encoder_value[i+BANKED_ENCODERS] = 6300; // Also set value of the 'shifted encoder')
+			raw_encoder_value[i] = 6350;
+			raw_encoder_value[i+BANKED_ENCODERS] = 6350; // Also set value of the 'shifted encoder')
 		} else {
 			raw_encoder_value[i] = 0;
 			raw_encoder_value[i+BANKED_ENCODERS] = 0; // Also set the value of the 'shifted encoder')
@@ -668,7 +668,7 @@ bool process_encoder_input_rotary_detent(uint8_t i, uint8_t virtual_encoder_id, 
 	} else { // Still In Detent
 		//midi_stream_raw_cc(9,99,13);
 		// Patch: Ensure the Detent LED is set even for higher resolution modes, like velocity sensitivity
-		indicator_value_buffer[encoder_bank][i] = 63;
+		indicator_value_buffer[encoder_bank][i] = 64;
 	}
 	return true;
 }
@@ -904,7 +904,7 @@ void process_encoder_input_switch(uint8_t i, uint8_t virtual_encoder_id, uint8_t
 				// Reset the encoder value
 				uint8_t control_change_value; // = scale_encoder_value(raw_encoder_value[virtual_encoder_id]);
 				if (encoder_settings[banked_encoder_id].has_detent){
-					raw_encoder_value[virtual_encoder_id] = 6300;
+					raw_encoder_value[virtual_encoder_id] = 6350;
 					control_change_value = scale_encoder_value(raw_encoder_value[virtual_encoder_id]);
 				} else {
 					raw_encoder_value[virtual_encoder_id] = 0;
