@@ -285,24 +285,8 @@ const USB_Descriptor_String_t PROGMEM ManufacturerString =
  */
 const USB_Descriptor_String_t PROGMEM ProductString =
 {
-
-	#if USE_ALTERNATE_ID == 0
-	.Header                 = {.Size = USB_STRING_LEN(20), .Type = DTYPE_String},
-	.UnicodeString          = L"Midi Fighter Twister"
-	
-	#elif USE_ALTERNATE_ID == 1
-	.Header                 = {.Size = USB_STRING_LEN(22), .Type = DTYPE_String},
-	.UnicodeString          = L"Midi Fighter Twister 2"
-	
-	#elif USE_ALTERNATE_ID == 2
-	.Header                 = {.Size = USB_STRING_LEN(22), .Type = DTYPE_String},
-	.UnicodeString          = L"Midi Fighter Twister 3"
-	
-	#else //if USE_ALTERNATE_ID == 3
-	.Header                 = {.Size = USB_STRING_LEN(22), .Type = DTYPE_String},
-	.UnicodeString          = L"Midi Fighter Twister 4"
-	
-	#endif
+	.Header                 = {.Size = USB_STRING_LEN(31), .Type = DTYPE_String},
+	.UnicodeString          = L"MIDI FIGHTER TWISTLUHH 20260315"
 	//Address = &ProductString;
 	//Size    = pgm_read_byte(&ProductString.Header.Size);
 	//#else
