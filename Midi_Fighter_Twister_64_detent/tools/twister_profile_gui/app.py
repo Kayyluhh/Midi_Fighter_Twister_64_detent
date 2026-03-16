@@ -4,6 +4,8 @@ import io
 import queue
 import random
 import shutil
+import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -2424,7 +2426,7 @@ class TwisterGui(Tk):
         margin_y = 78
         step_x = (width - margin_x * 2) / 3.0
         step_y = (height - margin_y * 2) / 3.0
-        radius = min(step_x, step_y) * 0.38
+        radius = min(step_x, step_y) * 0.34
 
         bank_start = self._current_bank_start()
         for row in range(4):
@@ -2449,15 +2451,13 @@ class TwisterGui(Tk):
                     width=11,
                     outline="#3c4457",
                 )
-                txt = c.create_text(cx, cy + radius + 20, text=f"{local_encoder + 1}", fill="#dde6f8", font=("TkDefaultFont", 13, "bold"))
-                tag = c.create_text(cx, cy - radius - 16, text=f"#{idx + 1}", fill="#c0cbe0", font=("TkDefaultFont", 11, "bold"))
+                txt = c.create_text(cx, cy + radius + 18, text=f"#{idx + 1}", fill="#dde6f8", font=("TkDefaultFont", 12, "bold"))
 
                 self.knob_items[idx] = {
                     "outer": outer,
                     "inner": inner,
                     "led": led,
                     "label": txt,
-                    "tag": tag,
                 }
 
         self.drag_rect_id = c.create_rectangle(0, 0, 0, 0, outline="#91b3ff", width=1, dash=(3, 2), state="hidden")
@@ -2493,7 +2493,6 @@ class TwisterGui(Tk):
             c.itemconfigure(ids["led"], outline=led_color)
             c.itemconfigure(ids["inner"], fill="#141820" if not selected else "#1d2330")
             c.itemconfigure(ids["label"], fill="#f2f6ff" if selected else "#dde6f8")
-            c.itemconfigure(ids["tag"], fill="#e0e8f8" if selected else "#c0cbe0")
 
     def _draw_mini_map(self) -> None:
         if self.mini_map is None:
@@ -3972,6 +3971,24 @@ class TwisterGui(Tk):
 
         return applied, str(backup_root)
 
+    def _restart_application(self) -> None:
+        try:
+            if getattr(sys, "frozen", False):
+                # PyInstaller app: relaunch bundled executable.
+                command = [sys.executable]
+                run_cwd = str(Path(sys.executable).resolve().parent)
+            else:
+                # Script mode: relaunch current interpreter + argv.
+                command = [sys.executable] + sys.argv
+                run_cwd = str(Path(__file__).resolve().parent)
+
+            subprocess.Popen(command, cwd=run_cwd, close_fds=True)
+        except Exception as exc:
+            messagebox.showerror("Restart Failed", f"Patch applied, but restart failed:\n{exc}")
+            return
+
+        self.destroy()
+
     def open_github_patcher(self) -> None:
         win = Toplevel(self)
         win.title("GitHub Patcher")
@@ -4059,7 +4076,11 @@ class TwisterGui(Tk):
             render(lines)
             self.status_var.set(f"Patch applied: {manifest.get('version', 'n/a')}")
             self._update_patch_status_summary(manifest=manifest)
-            messagebox.showinfo("GitHub Patcher", "Patch applied successfully. Restart the app to load all updates.")
+            if messagebox.askyesno(
+                "GitHub Patcher",
+                "Patch applied successfully. Restart now to load all updates?",
+            ):
+                self._restart_application()
 
         ttk.Button(footer, text="Check Manifest", command=check_manifest).pack(side=LEFT)
         ttk.Button(footer, text="Apply Patch", command=apply_patch).pack(side=LEFT, padx=8)
