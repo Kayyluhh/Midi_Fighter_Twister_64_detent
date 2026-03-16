@@ -1293,6 +1293,73 @@ class TwisterGui(Tk):
         start = bank * ENCODERS_PER_BANK
         return [start + i for i in range(ENCODERS_PER_BANK)]
 
+    def _capture_device_encoder_snapshot(self, targets: list[int]) -> dict[int, dict[str, int]]:
+        snap: dict[int, dict[str, int]] = {}
+        for idx in targets:
+            cfg = self.device_profile.encoders[idx]
+            snap[idx] = {field_name: clamp7(getattr(cfg, field_name)) for field_name in ENCODER_TAGS}
+        return snap
+
+    def _restore_profile_from_dict(self, data: dict) -> None:
+        self.profile = Profile.from_json_dict(data)
+        for key in GLOBAL_TAGS:
+            self.global_fields[key].set(self.profile.globals.get(key, 0))
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def _preflight_drift_warning(self, targets: list[int], label: str) -> bool:
+        if not self.client.connected or self.dry_run_var.get():
+            return True
+
+        baseline = self._capture_device_encoder_snapshot(targets)
+        local_profile_before = self.profile.to_json_dict()
+
+        try:
+            self.client.pull_global_config()
+            time.sleep(0.01)
+            for idx in targets:
+                self.client.pull_encoder(idx + 1)
+                time.sleep(0.006)
+
+            deadline = time.time() + 0.75
+            while time.time() < deadline:
+                self._drain_event_queue()
+                time.sleep(0.01)
+
+            changed_targets = 0
+            changed_fields = 0
+            for idx in targets:
+                before = baseline[idx]
+                now_cfg = self.device_profile.encoders[idx]
+                this_changed = False
+                for field_name in ENCODER_TAGS:
+                    now_val = clamp7(getattr(now_cfg, field_name))
+                    if now_val != before[field_name]:
+                        changed_fields += 1
+                        this_changed = True
+                if this_changed:
+                    changed_targets += 1
+        except Exception as exc:
+            messagebox.showwarning("Drift Check", f"{label}: could not run drift check ({exc}).")
+            changed_targets = 0
+            changed_fields = 0
+        finally:
+            self._restore_profile_from_dict(local_profile_before)
+
+        if changed_targets == 0:
+            return True
+
+        return messagebox.askyesno(
+            "Drift Detected",
+            (
+                f"{label}: device changed since last known baseline.\n\n"
+                f"Changed encoders: {changed_targets}\n"
+                f"Changed fields: {changed_fields}\n\n"
+                "Continue and overwrite device with current editor values?"
+            ),
+        )
+
     def _sync_globals_from_ui(self) -> None:
         for key in GLOBAL_TAGS:
             self.profile.globals[key] = clamp7(self.global_fields[key].get())
@@ -1396,6 +1463,8 @@ class TwisterGui(Tk):
             targets = self._target_indices_for_bank(bank)
             if not self._confirm_bulk_send(targets, f"Push Bank {bank + 1}"):
                 return
+            if not self._preflight_drift_warning(targets, f"Push Bank {bank + 1}"):
+                return
             snapshot_path = self._write_auto_backup_snapshot(f"push_bank_{bank + 1}", targets)
             for idx in targets:
                 self.client.push_encoder(idx + 1, self.profile.encoders[idx])
@@ -1418,6 +1487,8 @@ class TwisterGui(Tk):
             targets = list(range(TOTAL_ENCODERS))
             if not self._confirm_bulk_send(targets, "Push All Banks"):
                 return
+            if not self._preflight_drift_warning(targets, "Push All Banks"):
+                return
             snapshot_path = self._write_auto_backup_snapshot("push_all_banks", targets)
             for idx in targets:
                 self.client.push_encoder(idx + 1, self.profile.encoders[idx])
@@ -1431,6 +1502,8 @@ class TwisterGui(Tk):
             self._sync_globals_from_ui()
             targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
             if not self._confirm_bulk_send(targets, "Send Selected"):
+                return
+            if not self._preflight_drift_warning(targets, "Send Selected"):
                 return
             snapshot_path = self._write_auto_backup_snapshot("push_selected", targets)
             for idx in targets:
@@ -1610,13 +1683,16 @@ class TwisterGui(Tk):
             messagebox.showerror("Import Error", str(exc))
 
     def _poll_events(self) -> None:
+        self._drain_event_queue()
+        self.after(40, self._poll_events)
+
+    def _drain_event_queue(self) -> None:
         while True:
             try:
                 event = self.events.get_nowait()
             except queue.Empty:
                 break
             self._handle_event(event)
-        self.after(40, self._poll_events)
 
     def _handle_event(self, event: dict) -> None:
         if event.get("type") != "sysex":
