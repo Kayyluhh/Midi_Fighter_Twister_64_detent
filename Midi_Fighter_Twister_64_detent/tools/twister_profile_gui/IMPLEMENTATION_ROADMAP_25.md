@@ -27,8 +27,8 @@ Any agent continuing work should start here and update status/logs before and af
 2. Device Snapshot + Auto-Backup - done
 3. One-Click Restore Point - done
 4. Live MIDI Activity Monitor - planned
-5. Conflict or Drift Warning - planned
-6. Smart Validation Rules - planned
+5. Conflict or Drift Warning - done
+6. Smart Validation Rules - done
 7. Performance Mode (smart batching/throttling) - planned
 8. Push Preview Heatmap - planned
 9. Favorites and Lock Fields - planned
@@ -219,5 +219,7 @@ After coding:
 - Updated README with pointers to roadmap and template files.
 - Implemented Feature 2: automatic pre-send snapshots written to tools/twister_profile_gui/backups/.
 - Implemented Feature 3: one-click restore from latest snapshot with optional immediate push.
-- Next immediate implementation target: Phase 1 features 2, 3, 5, 6.
+- Implemented Feature 5: preflight drift detection re-pulls targets and warns before overwrite.
+- Implemented Feature 6: smart send validation with blocking errors and confirmable warnings.
+- Next immediate implementation target: Phase 2 features 4 and 25.
 - Validation pending for firmware build in this session.

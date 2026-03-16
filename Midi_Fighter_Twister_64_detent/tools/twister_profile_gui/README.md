@@ -93,6 +93,8 @@ python3 app.py
 
 - `Dry Run`: no MIDI send, shows change preview only.
 - `Confirm >= N`: asks for confirmation when sending to `N` or more encoders.
+- `Drift Check`: preflight pull detects device-side changes since last baseline and asks before overwrite.
+- `Validation Guardrails`: blocks invalid channel/range combinations and prompts on risky settings.
 
 ## macOS App Bundle
 
