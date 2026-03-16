@@ -531,6 +531,7 @@ class TwisterGui(Tk):
         self.host_bridge_var = StringVar(value="")
         self.metadata_summary_var = StringVar(value="")
         self.patch_manifest_url_var = StringVar(value=DEFAULT_PATCH_MANIFEST_URL)
+        self.patch_status_var = StringVar(value="Patcher: no patches applied")
         self.template_library = self._load_template_library()
         self.host_bridge_presets = self._load_host_bridge_presets()
         self.template_combo = None
@@ -565,6 +566,7 @@ class TwisterGui(Tk):
         self._update_context_labels()
         self._refresh_library_state()
         self._update_metadata_summary()
+        self._update_patch_status_summary()
         self._update_sandbox_status()
         self._animate_selection_pulse()
         self.after(40, self._poll_events)
@@ -1130,8 +1132,12 @@ class TwisterGui(Tk):
         ttk.Button(sharing, text="Export Host Bridge", command=self.export_host_bridge_preset).pack(side=LEFT, padx=4)
 
         metadata_line = ttk.Frame(profile_frame)
-        metadata_line.pack(fill=X, padx=8, pady=(0, 6))
+        metadata_line.pack(fill=X, padx=8, pady=(0, 4))
         ttk.Label(metadata_line, textvariable=self.metadata_summary_var).pack(side=LEFT)
+
+        patch_line = ttk.Frame(profile_frame)
+        patch_line.pack(fill=X, padx=8, pady=(0, 6))
+        ttk.Label(patch_line, textvariable=self.patch_status_var).pack(side=LEFT)
 
         tabs_wrap = ttk.Frame(profile_frame)
         tabs_wrap.pack(fill=X, padx=8, pady=(0, 6))
@@ -3720,6 +3726,24 @@ class TwisterGui(Tk):
             "recent_midi_log": self.midi_log_lines[-200:],
         }
 
+    def _update_patch_status_summary(self, manifest: dict | None = None) -> None:
+        latest_version = "none"
+        try:
+            history_path = self.patch_dir / "patch_history.jsonl"
+            if history_path.exists():
+                lines = [line for line in history_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                if lines:
+                    record = json.loads(lines[-1])
+                    latest_version = str(record.get("version") or "applied")
+        except Exception:
+            latest_version = "unknown"
+
+        manifest_version = "unknown"
+        if isinstance(manifest, dict):
+            manifest_version = str(manifest.get("version") or "unknown")
+
+        self.patch_status_var.set(f"Patcher: latest applied={latest_version} | manifest={manifest_version}")
+
     def _fetch_patch_manifest(self, url: str) -> dict:
         try:
             with urllib.request.urlopen(url, timeout=20) as response:
@@ -3836,6 +3860,7 @@ class TwisterGui(Tk):
 
             state["manifest"] = manifest
             self._save_app_settings()
+            self._update_patch_status_summary(manifest=manifest)
             lines = [
                 "Manifest Loaded",
                 "",
@@ -3883,6 +3908,7 @@ class TwisterGui(Tk):
             lines.extend([f"- {item}" for item in applied[:120]])
             render(lines)
             self.status_var.set(f"Patch applied: {manifest.get('version', 'n/a')}")
+            self._update_patch_status_summary(manifest=manifest)
             messagebox.showinfo("GitHub Patcher", "Patch applied successfully. Restart the app to load all updates.")
 
         ttk.Button(footer, text="Check Manifest", command=check_manifest).pack(side=LEFT)
