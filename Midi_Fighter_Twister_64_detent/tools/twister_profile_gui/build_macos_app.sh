@@ -25,6 +25,8 @@ fi
   --clean \
   --windowed \
   --name "MFT Profile GUI" \
+  --hidden-import "mido.backends.rtmidi" \
+  --hidden-import "rtmidi" \
   --add-data "presets.json:." \
   --add-data "templates:templates" \
   --add-data "host_presets:host_presets" \

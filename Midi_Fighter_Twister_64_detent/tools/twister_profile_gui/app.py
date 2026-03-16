@@ -272,11 +272,17 @@ class TwisterMidiClient:
 
     @staticmethod
     def list_input_ports() -> list[str]:
-        return list(mido.get_input_names())
+        try:
+            return list(mido.get_input_names())
+        except Exception:
+            return []
 
     @staticmethod
     def list_output_ports() -> list[str]:
-        return list(mido.get_output_names())
+        try:
+            return list(mido.get_output_names())
+        except Exception:
+            return []
 
     def connect(self, input_name: str, output_name: str) -> None:
         self.disconnect()
