@@ -559,6 +559,7 @@ class TwisterGui(Tk):
         ttk.Button(macros, text="+ MIDI Ch", command=self.macro_increment_midi_channel).pack(side=LEFT, padx=4)
         ttk.Button(macros, text="Remap CC Span", command=self.macro_remap_cc_span).pack(side=LEFT, padx=4)
         ttk.Button(macros, text="Invert CC (127-x)", command=self.macro_invert_cc_numbers).pack(side=LEFT, padx=4)
+        ttk.Button(macros, text="Convert Rel/Abs", command=self.convert_relative_absolute_assistant).pack(side=LEFT, padx=4)
 
         presets = ttk.Frame(profile_frame)
         presets.pack(fill=X, padx=8, pady=(0, 6))
@@ -1530,6 +1531,48 @@ class TwisterGui(Tk):
             enc = self.profile.encoders[idx]
             enc.encoder_midi_number = clamp7(127 - enc.encoder_midi_number)
             enc.switch_midi_number = clamp7(127 - enc.switch_midi_number)
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def convert_relative_absolute_assistant(self) -> None:
+        targets = self._selected_targets()
+        if not targets:
+            return
+
+        to_absolute = messagebox.askyesnocancel(
+            "Conversion Assistant",
+            (
+                "Convert selected encoders:\n\n"
+                "Yes = Absolute (SEND_CC)\n"
+                "No = Relative (SEND_REL_ENC)\n"
+                "Cancel = abort"
+            ),
+        )
+        if to_absolute is None:
+            return
+
+        target_type = 1 if to_absolute else 2
+        target_label = "Absolute (SEND_CC)" if to_absolute else "Relative (SEND_REL_ENC)"
+        changed = 0
+        for idx in targets:
+            if self.profile.encoders[idx].encoder_midi_type != target_type:
+                changed += 1
+
+        if changed == 0:
+            messagebox.showinfo("Conversion Assistant", f"No changes needed. Selected encoders are already {target_label}.")
+            return
+
+        if not messagebox.askyesno(
+            "Confirm Conversion",
+            f"{changed} of {len(targets)} selected encoder(s) will be converted to {target_label}. Continue?",
+        ):
+            return
+
+        self._push_history()
+        for idx in targets:
+            self.profile.encoders[idx].encoder_midi_type = target_type
+
         self._load_encoder_fields_from_model()
         self._draw_knob_grid()
         self._draw_mini_map()
