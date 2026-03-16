@@ -13,6 +13,9 @@ Desktop app for configuring Midi Fighter Twister profiles and LED colors via MID
 - Performance mode with configurable transfer delay and retry for bulk operations.
 - Push preview heatmap for selected or all encoders.
 - Favorites and lock-fields controls for safer, faster batch editing.
+- Color theme packs for quick visual styling.
+- Rules-based auto-coloring (by MIDI channel, type, or CC range).
+- Advanced multi-edit macros for MIDI channel and CC transforms.
 - Automatic pre-send snapshots for push actions (saved under `backups/`).
 - One-click restore of the latest snapshot, with optional immediate push to device.
 - Graphical 4x4 Twister-style bank view with per-knob color preview.
@@ -78,8 +81,10 @@ python3 app.py
 10. Open `MIDI Monitor` to inspect SysEx TX/RX stream.
 11. Use `Heatmap Selected` or `Heatmap All` to preview where pushes will change values.
 12. Mark fields as `Fav` and/or `Lock`, then use `Apply Favorites` for quick targeted edits.
-13. Use `Export Diagnostics` to save app/MIDI/safety state and recent logs.
-14. Save full JSON or export a bank snippet JSON.
+13. Apply a `Theme Pack` and/or run an `Auto-Color Rule` on selected knobs or all 64.
+14. Use `Macros` for fast channel increment, CC span remap, or CC invert transforms.
+15. Use `Export Diagnostics` to save app/MIDI/safety state and recent logs.
+16. Save full JSON or export a bank snippet JSON.
 
 ## Everything Bundle
 

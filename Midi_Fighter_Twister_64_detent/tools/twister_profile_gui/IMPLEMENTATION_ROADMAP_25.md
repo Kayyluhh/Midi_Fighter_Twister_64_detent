@@ -32,10 +32,10 @@ Any agent continuing work should start here and update status/logs before and af
 7. Performance Mode (smart batching/throttling) - done
 8. Push Preview Heatmap - done
 9. Favorites and Lock Fields - done
-10. Color Theme Packs - planned
+10. Color Theme Packs - done
 11. Per-Bank Color Gradients - done
-12. Rules-Based Auto-Coloring - planned
-13. Advanced Multi-Edit Macros - planned
+12. Rules-Based Auto-Coloring - done
+13. Advanced Multi-Edit Macros - done
 14. Relative or Absolute Conversion Assistant - planned
 15. Profile Compare Tool - planned
 16. Merge Profiles - planned
@@ -226,5 +226,8 @@ After coding:
 - Implemented Feature 7: performance mode with configurable transfer delay and retry for bulk operations.
 - Implemented Feature 8: push preview heatmap overlay for selected/all encoder targets.
 - Implemented Feature 9: per-field favorites and lock controls with favorites-only apply action.
-- Next immediate implementation target: Phase 3 feature 10.
+- Implemented Feature 10: one-click color theme packs for selected/all encoders.
+- Implemented Feature 12: rules-based auto-coloring by channel, type, or CC range.
+- Implemented Feature 13: macro transforms for channels and CC spans.
+- Next immediate implementation target: Phase 3 feature 14.
 - Validation pending for firmware build in this session.
