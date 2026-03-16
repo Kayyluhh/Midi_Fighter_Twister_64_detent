@@ -68,7 +68,7 @@ const USB_Descriptor_Device_t PROGMEM DeviceDescriptor =
 	#else // USE_ALTERNATE_ID == 3
 		.ProductID              = 0x3007,
 	#endif
-	.ReleaseNumber          = VERSION_BCD(0,0,1),
+	.ReleaseNumber          = VERSION_BCD(1,2,0),
 
 	.ManufacturerStrIndex   = STRING_ID_Manufacturer,
 	.ProductStrIndex        = STRING_ID_Product,

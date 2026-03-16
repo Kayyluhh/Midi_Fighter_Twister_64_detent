@@ -81,7 +81,7 @@ int16_t  raw_encoder_value[VIRTUAL_ENCODERS]; // !Summer2016Update: Expanded to 
 // --- 112-127: Encoders Bank 4 (Shifted)
 
 static uint8_t encoder_bank = 0;
-static int8_t g_detent_size;
+static int8_t g_detent_size = DEF_DETENT_SIZE;
 static int8_t g_dead_zone_size;
 static bool soft_takeover_enabled = true;
 static uint8_t soft_takeover_target[VIRTUAL_ENCODERS];
@@ -206,6 +206,19 @@ bool encoders_get_soft_takeover_enabled(void) {
 	return soft_takeover_enabled;
 }
 
+void encoders_set_detent_size(uint8_t size) {
+	if (size < 1) {
+		size = 1;
+	} else if (size > 31) {
+		size = 31;
+	}
+	g_detent_size = (int8_t)size;
+}
+
+uint8_t encoders_get_detent_size(void) {
+	return (uint8_t)g_detent_size;
+}
+
 // !Summer2016Update: Removed input_map in favor of expanding encoder_settings table
 //~ void sync_input_map_to_output_map(uint8_t encoder_id)  // Accepted Encoder IDs are: 0-63 (16-encoders per each of the 4-banks)
 //~ {
@@ -280,8 +293,7 @@ void encoders_init(void)
 		//~ sync_input_map_to_output_map(i);
 	//~ }
 		
-	// Set the de-tent size	TODO THIS SHOULD BE A SETTING
-	g_detent_size = 5;	
+	// Set the de-tent size via persistent config.
 	g_dead_zone_size = 2;	
 }
 

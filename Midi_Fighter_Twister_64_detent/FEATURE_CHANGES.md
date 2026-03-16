@@ -1,6 +1,6 @@
 # MIDI Fighter Twister Firmware Changes
 
-Release target: v1.1
+Release target: v1.2
 
 This document summarizes custom changes added in this branch, where they are implemented, and what behavior they add.
 
@@ -62,6 +62,26 @@ Behavior:
 Implemented in:
 - `src/encoders.c`
   - `g_detent_size` changed from `8` to `5`.
+
+## 3.1) New in v1.2: Configurable Detent Size
+
+Behavior:
+- Detent exit threshold is now a persisted global setting instead of a firmware-only constant.
+- The GUI can pull, edit, and push `detent_size` as part of global configuration.
+- Valid range is `1..31`.
+
+Implemented in:
+- `src/constants.h`
+  - Added `EE_DETENT_SIZE` and `DEF_DETENT_SIZE`.
+  - EEPROM layout bumped to `9`.
+- `src/config.h`
+  - Added `detent_size` to the global config table.
+- `src/config.c`
+  - SysEx push/pull now persist and report tag `36` for detent size.
+  - `load_config()` applies the saved detent size at boot.
+- `src/encoders.c`
+  - Added `encoders_set_detent_size()` and `encoders_get_detent_size()`.
+  - Removed the remaining hardcoded runtime detent threshold.
 
 ## 4) Soft Takeover / Pickup for Absolute Encoders
 

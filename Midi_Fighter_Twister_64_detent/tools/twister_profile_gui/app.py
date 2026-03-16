@@ -43,6 +43,7 @@ GLOBAL_TAGS = {
     "soft_takeover": 33,
     "bank_wrap_mode": 34,
     "shift_page_latch": 35,
+    "detent_size": 36,
 }
 
 # Encoder tag map from config.c Bulk Transfer response (10..24).
@@ -92,6 +93,25 @@ THEME_PACKS: dict[str, dict[str, int]] = {
     "Ocean Cool": {"active_color": 90, "inactive_color": 80, "detent_color": 100},
     "Mono Stage": {"active_color": 120, "inactive_color": 40, "detent_color": 64},
     "Colorblind Safe": {"active_color": 101, "inactive_color": 1, "detent_color": 52},
+}
+
+FIRMWARE_CAPABILITIES: dict[str, dict[str, object]] = {
+    "open-source-default": {
+        "label": "Open Source Default",
+        "unsupported_globals": [],
+        "max_indicator_display_type": 3,
+        "max_movement": 2,
+        "max_encoder_midi_type": 5,
+        "supports_shift_channel": True,
+    },
+    "legacy-v1": {
+        "label": "Legacy V1",
+        "unsupported_globals": ["bank_wrap_mode", "shift_page_latch"],
+        "max_indicator_display_type": 2,
+        "max_movement": 1,
+        "max_encoder_midi_type": 2,
+        "supports_shift_channel": False,
+    },
 }
 
 
@@ -216,6 +236,7 @@ class Profile:
         "soft_takeover": 1,
         "bank_wrap_mode": 1,
         "shift_page_latch": 0,
+        "detent_size": 5,
     })
     encoders: list[EncoderConfig] = field(default_factory=lambda: [EncoderConfig() for _ in range(TOTAL_ENCODERS)])
 
@@ -1873,6 +1894,10 @@ class TwisterGui(Tk):
             midi_channel = clamp7(self.profile.globals.get("midi_channel", 0))
             if midi_channel > 15:
                 errors.append(f"Global midi_channel is {midi_channel}; expected 0..15 (MIDI channels 1..16).")
+
+            detent_size = clamp7(self.profile.globals.get("detent_size", 0))
+            if detent_size < 1 or detent_size > 31:
+                errors.append(f"Global detent_size is {detent_size}; expected 1..31.")
 
             super_start = clamp7(self.profile.globals.get("super_start", 0))
             super_end = clamp7(self.profile.globals.get("super_end", 0))

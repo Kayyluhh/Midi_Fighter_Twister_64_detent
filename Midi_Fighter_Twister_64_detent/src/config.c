@@ -76,6 +76,7 @@ static void sysExCmdPushConfig (uint8_t length, uint8_t* buffer)
 	eeprom_write(EE_SOFT_TAKEOVER, config.soft_takeover ? 1 : 0);
 	eeprom_write(EE_BANK_WRAP_MODE, config.bank_wrap_mode ? 1 : 0);
 	eeprom_write(EE_SHIFT_PAGE_LATCH, config.shift_page_latch ? 1 : 0);
+	eeprom_write(EE_DETENT_SIZE, config.detent_size);
 
 	setting_confirmation_animation(0x00FF00);
 		
@@ -118,6 +119,7 @@ void send_config_data (void)
 								33, global_soft_takeover,
 								34, global_bank_wrap_mode,
 								35, global_shift_page_latch,
+								36, global_detent_size,
                                 0xf7};
 								
     midi_stream_sysex(sizeof(payload), payload);
@@ -379,6 +381,11 @@ void load_config(void)
 	global_soft_takeover       = eeprom_read(EE_SOFT_TAKEOVER) ? 1 : 0;
 	global_bank_wrap_mode      = eeprom_read(EE_BANK_WRAP_MODE) ? 1 : 0;
 	global_shift_page_latch    = eeprom_read(EE_SHIFT_PAGE_LATCH) ? 1 : 0;
+	global_detent_size         = eeprom_read(EE_DETENT_SIZE);
+	if (global_detent_size < 1 || global_detent_size > 31) {
+		global_detent_size = DEF_DETENT_SIZE;
+	}
+	encoders_set_detent_size(global_detent_size);
 	encoders_set_soft_takeover_enabled(global_soft_takeover);
 	
 	side_switch_config(&side_sw_cfg);
@@ -414,6 +421,7 @@ void config_factory_reset(void)
 	eeprom_write(EE_SOFT_TAKEOVER, DEF_SOFT_TAKEOVER ? 1 : 0);
 	eeprom_write(EE_BANK_WRAP_MODE, DEF_BANK_WRAP_MODE ? 1 : 0);
 	eeprom_write(EE_SHIFT_PAGE_LATCH, DEF_SHIFT_PAGE_LATCH ? 1 : 0);
+	eeprom_write(EE_DETENT_SIZE, DEF_DETENT_SIZE);
 	
 	cpu_irq_enable();
 	

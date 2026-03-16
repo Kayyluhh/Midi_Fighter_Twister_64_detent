@@ -31,10 +31,10 @@
 //#define DEVICE_VERSION  		((DEVICE_VERSION_YEAR << 16) | (DEVICE_VERSION_MONTH << 8) | DEVICE_VERSION_DAY)
 
 #define FW_VERSION_MAJOR        0x01
-#define FW_VERSION_MINOR        0x01
+#define FW_VERSION_MINOR        0x02
 #define DEVICE_VERSION_YEAR 	0x0001
-#define DEVICE_VERSION_MONTH	0x01
-#define DEVICE_VERSION_DAY		0x01
+#define DEVICE_VERSION_MONTH	0x02
+#define DEVICE_VERSION_DAY		0x00
 #define DEVICE_VERSION  		((DEVICE_VERSION_YEAR << 23) | (DEVICE_VERSION_MONTH << 6) | DEVICE_VERSION_DAY)
 
 // 14bit device family ID, LSB first
@@ -88,7 +88,7 @@
 
 // EEPROM Constants -------------------------------------------------------
 
-#define EEPROM_LAYOUT			         8	//The EEPROM layout version
+#define EEPROM_LAYOUT			         9	//The EEPROM layout version
 
 // EEPROM Memory Locations for configurable settings
 
@@ -110,6 +110,7 @@
 #define EE_SOFT_TAKEOVER            0x000E  //Enable soft takeover for absolute encoders
 #define EE_BANK_WRAP_MODE           0x000F  //Wrap bank up/down at edges
 #define EE_SHIFT_PAGE_LATCH         0x0010  //Latch shift pages instead of hold-only
+#define EE_DETENT_SIZE              0x0011  //Global detent exit threshold for detented encoders
 
 #define EE_ENC_SETTING_START		0x0020  //Start of encoder settings
 #define EE_HAS_DETENT_OFFSET		0x0000  //Has Detent setting offset			    //
@@ -152,6 +153,7 @@
 #define DEF_SOFT_TAKEOVER        true
 #define DEF_BANK_WRAP_MODE       true
 #define DEF_SHIFT_PAGE_LATCH     false
+#define DEF_DETENT_SIZE          5
 
 //Encoder
 #define DEF_ENC_DETENT          false
