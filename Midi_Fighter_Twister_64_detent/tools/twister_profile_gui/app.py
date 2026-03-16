@@ -553,6 +553,13 @@ class TwisterGui(Tk):
         ttk.Button(quick, text="Copy To Slot", command=self.copy_to_slot).pack(side=LEFT, padx=4)
         ttk.Button(quick, text="Paste Slot To Selected", command=self.paste_from_slot).pack(side=LEFT, padx=4)
 
+        macros = ttk.Frame(profile_frame)
+        macros.pack(fill=X, padx=8, pady=(0, 6))
+        ttk.Label(macros, text="Macros").pack(side=LEFT)
+        ttk.Button(macros, text="+ MIDI Ch", command=self.macro_increment_midi_channel).pack(side=LEFT, padx=4)
+        ttk.Button(macros, text="Remap CC Span", command=self.macro_remap_cc_span).pack(side=LEFT, padx=4)
+        ttk.Button(macros, text="Invert CC (127-x)", command=self.macro_invert_cc_numbers).pack(side=LEFT, padx=4)
+
         presets = ttk.Frame(profile_frame)
         presets.pack(fill=X, padx=8, pady=(0, 6))
         ttk.Label(presets, text="Preset Name").pack(side=LEFT)
@@ -1468,6 +1475,64 @@ class TwisterGui(Tk):
 
     def apply_auto_color_rule_all(self) -> None:
         self._apply_auto_color_rule_to_targets(list(range(TOTAL_ENCODERS)))
+
+    def _selected_targets(self) -> list[int]:
+        return sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
+
+    def macro_increment_midi_channel(self) -> None:
+        targets = self._selected_targets()
+        if not targets:
+            return
+        step = simpledialog.askinteger("Macro", "Channel step (-15..15)", minvalue=-15, maxvalue=15, initialvalue=1)
+        if step is None:
+            return
+        self._push_history()
+        for idx in targets:
+            enc = self.profile.encoders[idx]
+            enc.encoder_midi_channel = clamp7((enc.encoder_midi_channel + step) % 16)
+            enc.switch_midi_channel = clamp7((enc.switch_midi_channel + step) % 16)
+            enc.encoder_shift_midi_channel = clamp7((enc.encoder_shift_midi_channel + step) % 16)
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def macro_remap_cc_span(self) -> None:
+        targets = self._selected_targets()
+        if not targets:
+            return
+        start = simpledialog.askinteger("Macro", "New CC span start (0..127)", minvalue=0, maxvalue=127, initialvalue=0)
+        if start is None:
+            return
+        end = simpledialog.askinteger("Macro", "New CC span end (0..127)", minvalue=0, maxvalue=127, initialvalue=127)
+        if end is None:
+            return
+        if len(targets) == 1:
+            mapped = [start]
+        else:
+            mapped = [int(start + (end - start) * (i / (len(targets) - 1))) for i in range(len(targets))]
+
+        self._push_history()
+        for pos, idx in enumerate(targets):
+            cc = clamp7(mapped[pos])
+            enc = self.profile.encoders[idx]
+            enc.encoder_midi_number = cc
+            enc.switch_midi_number = cc
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def macro_invert_cc_numbers(self) -> None:
+        targets = self._selected_targets()
+        if not targets:
+            return
+        self._push_history()
+        for idx in targets:
+            enc = self.profile.encoders[idx]
+            enc.encoder_midi_number = clamp7(127 - enc.encoder_midi_number)
+            enc.switch_midi_number = clamp7(127 - enc.switch_midi_number)
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
 
     def pull_global(self) -> None:
         try:
