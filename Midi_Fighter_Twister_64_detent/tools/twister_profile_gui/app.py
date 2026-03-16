@@ -465,6 +465,7 @@ class TwisterGui(Tk):
 
         ttk.Button(toolbar, text="Load JSON", command=self.load_json).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Save JSON", command=self.save_json).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Restore Last Snapshot", command=self.restore_last_snapshot).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Import Bundle", command=self.import_everything_bundle).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Export Everything", command=self.export_everything_bundle).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Import Bank Snippet", command=self.import_bank_snippet).pack(side=LEFT, padx=4)
@@ -1315,6 +1316,50 @@ class TwisterGui(Tk):
         payload = self._snapshot_payload(label, targets)
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return path
+
+    def _latest_snapshot_path(self) -> Path | None:
+        files = sorted(self.backup_dir.glob("snapshot_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return files[0] if files else None
+
+    def restore_last_snapshot(self) -> None:
+        path = self._latest_snapshot_path()
+        if path is None:
+            messagebox.showwarning("No Snapshot", "No auto-backup snapshot exists yet.")
+            return
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            profile_data = raw.get("profile", {})
+            self._push_history()
+            self.profile = Profile.from_json_dict(profile_data)
+
+            presets_data = raw.get("named_presets", {})
+            if isinstance(presets_data, dict):
+                clean_presets: dict[str, dict] = {}
+                for name, payload in presets_data.items():
+                    if isinstance(name, str) and isinstance(payload, dict):
+                        clean = {}
+                        for field_name in ENCODER_TAGS:
+                            if field_name in payload:
+                                clean[field_name] = clamp7(payload[field_name])
+                        if clean:
+                            clean_presets[name] = clean
+                self.named_presets = clean_presets
+                self._save_named_presets()
+
+            for key in GLOBAL_TAGS:
+                self.global_fields[key].set(self.profile.globals.get(key, 0))
+            self._load_encoder_fields_from_model()
+            self._draw_knob_grid()
+            self._draw_mini_map()
+            self.status_var.set(f"Restored snapshot: {path.name}")
+
+            if self.client.connected and messagebox.askyesno(
+                "Push Restored Profile",
+                "Snapshot restored in editor. Push all 64 encoders to device now?",
+            ):
+                self.push_all_banks()
+        except Exception as exc:
+            messagebox.showerror("Restore Error", str(exc))
 
     def _confirm_bulk_send(self, targets: list[int], label: str) -> bool:
         if self.dry_run_var.get():
