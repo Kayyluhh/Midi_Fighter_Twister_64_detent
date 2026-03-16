@@ -10,6 +10,7 @@ Desktop app for configuring Midi Fighter Twister profiles and LED colors via MID
 - Pull and push all banks (all 64 encoders) in one action.
 - Live MIDI monitor for outgoing and incoming SysEx activity.
 - Diagnostics report export for support and troubleshooting.
+- Performance mode with configurable transfer delay and retry for bulk operations.
 - Automatic pre-send snapshots for push actions (saved under `backups/`).
 - One-click restore of the latest snapshot, with optional immediate push to device.
 - Graphical 4x4 Twister-style bank view with per-knob color preview.
@@ -97,6 +98,7 @@ python3 app.py
 
 - `Dry Run`: no MIDI send, shows change preview only.
 - `Confirm >= N`: asks for confirmation when sending to `N` or more encoders.
+- `Performance Mode`: allows tuned send/pull pacing and short retries to improve reliability.
 - `Drift Check`: preflight pull detects device-side changes since last baseline and asks before overwrite.
 - `Validation Guardrails`: blocks invalid channel/range combinations and prompts on risky settings.
 
