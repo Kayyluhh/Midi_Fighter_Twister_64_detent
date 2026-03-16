@@ -15,6 +15,7 @@ Desktop app for configuring Midi Fighter Twister profiles and LED colors via MID
 - Guided recovery mode for reconnect, repull, validation, and snapshot recovery.
 - Session sandbox with explicit commit/discard controls before device writes.
 - Local app settings persistence for safety and editing preferences.
+- Keyboard-first editing mode with navigation, send/pull, preview, and safety workflow shortcuts.
 - Push preview heatmap for selected or all encoders.
 - Favorites and lock-fields controls for safer, faster batch editing.
 - Color theme packs for quick visual styling.
@@ -120,6 +121,33 @@ python3 app.py
 24. Use `Export Show Pack` to bundle profile + presets + metadata with integrity checks.
 25. Use `Export Diagnostics` to save app/MIDI/safety state and recent logs.
 26. Save full JSON or export a bank snippet JSON.
+27. Press `Ctrl+/` to open the keyboard shortcut cheat sheet.
+
+## Keyboard Shortcuts
+
+- `Ctrl+Enter`: Send Selected
+- `Ctrl+Shift+Enter`: Push Bank
+- `Ctrl+Alt+Enter`: Push All Banks
+- `Ctrl+G`: Push Global
+- `Ctrl+L`: Pull Bank
+- `Ctrl+Shift+L`: Pull All Banks
+- `Ctrl+Shift+G`: Pull Global
+- `Ctrl+P`: Preview Diff
+- `Ctrl+H`: Heatmap Selected
+- `Ctrl+Shift+H`: Heatmap All
+- `Ctrl+Alt+H`: Clear Heatmap
+- `Ctrl+A`: Select all 16 encoders in current bank
+- `Ctrl+R`: Select active row
+- `Alt+Arrow`: Move active encoder in the 4x4 bank grid
+- `Ctrl+[` / `Ctrl+]`: Previous/next bank
+- `Ctrl+1..4`: Jump directly to bank 1-4
+- `Ctrl+Shift+F`: Apply favorites to selected encoders
+- `Ctrl+Shift+C`: Run firmware compatibility report
+- `Ctrl+Shift+R`: Open guided recovery mode
+- `Ctrl+Shift+S`: Start session sandbox
+- `Ctrl+Shift+K`: Commit sandbox
+- `Ctrl+Shift+D`: Discard sandbox
+- `Ctrl+/`: Open keyboard shortcut cheat sheet
 
 ## Portable Show Pack
 

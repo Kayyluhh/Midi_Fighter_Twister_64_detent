@@ -548,6 +548,7 @@ class TwisterGui(Tk):
         self._animate_selection_pulse()
         self.after(40, self._poll_events)
         self.protocol("WM_DELETE_WINDOW", self._on_close_app)
+        self._register_keyboard_shortcuts()
 
         self.bank_var.trace_add("write", self._on_var_changed)
         self.encoder_var.trace_add("write", self._on_var_changed)
@@ -573,6 +574,121 @@ class TwisterGui(Tk):
         self.bind("<Command-Z>", lambda _e: self.redo())
         self.bind("<Control-z>", lambda _e: self.undo())
         self.bind("<Control-y>", lambda _e: self.redo())
+
+    def _register_keyboard_shortcuts(self) -> None:
+        # Bind on all widgets so keyboard-first editing still works when controls have focus.
+        shortcuts = [
+            ("<Control-Return>", lambda _e: self._shortcut_action(self.push_selected_encoder)),
+            ("<Control-Shift-Return>", lambda _e: self._shortcut_action(self.push_bank)),
+            ("<Control-Alt-Return>", lambda _e: self._shortcut_action(self.push_all_banks)),
+            ("<Control-g>", lambda _e: self._shortcut_action(self.push_global)),
+            ("<Control-l>", lambda _e: self._shortcut_action(self.pull_bank)),
+            ("<Control-Shift-L>", lambda _e: self._shortcut_action(self.pull_all_banks)),
+            ("<Control-Shift-G>", lambda _e: self._shortcut_action(self.pull_global)),
+            ("<Control-p>", lambda _e: self._shortcut_action(self.preview_diff_selected)),
+            ("<Control-h>", lambda _e: self._shortcut_action(self.preview_heatmap_selected)),
+            ("<Control-Shift-H>", lambda _e: self._shortcut_action(self.preview_heatmap_all)),
+            ("<Control-Alt-h>", lambda _e: self._shortcut_action(self.clear_heatmap)),
+            ("<Control-r>", lambda _e: self._shortcut_action(self.select_row_from_active)),
+            ("<Control-a>", lambda _e: self._shortcut_action(self.select_all_in_bank)),
+            ("<Control-Shift-F>", lambda _e: self._shortcut_action(self.apply_favorites_to_selected)),
+            ("<Control-Shift-C>", lambda _e: self._shortcut_action(self.show_firmware_compatibility_report)),
+            ("<Control-Shift-R>", lambda _e: self._shortcut_action(self.guided_recovery_mode)),
+            ("<Control-Shift-S>", lambda _e: self._shortcut_action(self.start_sandbox)),
+            ("<Control-Shift-K>", lambda _e: self._shortcut_action(self.commit_sandbox)),
+            ("<Control-Shift-D>", lambda _e: self._shortcut_action(self.discard_sandbox)),
+            ("<Control-bracketleft>", lambda _e: self._shortcut_action(self._jump_bank_relative, -1)),
+            ("<Control-bracketright>", lambda _e: self._shortcut_action(self._jump_bank_relative, 1)),
+            ("<Control-Key-1>", lambda _e: self._shortcut_action(self._set_bank_shortcut, 1)),
+            ("<Control-Key-2>", lambda _e: self._shortcut_action(self._set_bank_shortcut, 2)),
+            ("<Control-Key-3>", lambda _e: self._shortcut_action(self._set_bank_shortcut, 3)),
+            ("<Control-Key-4>", lambda _e: self._shortcut_action(self._set_bank_shortcut, 4)),
+            ("<Alt-Left>", lambda _e: self._shortcut_action(self._move_active_encoder, -1)),
+            ("<Alt-Right>", lambda _e: self._shortcut_action(self._move_active_encoder, 1)),
+            ("<Alt-Up>", lambda _e: self._shortcut_action(self._move_active_encoder, -4)),
+            ("<Alt-Down>", lambda _e: self._shortcut_action(self._move_active_encoder, 4)),
+            ("<Control-slash>", lambda _e: self._shortcut_action(self.show_keyboard_shortcuts)),
+        ]
+        for pattern, handler in shortcuts:
+            self.bind_all(pattern, handler)
+
+    def _shortcut_guard(self) -> bool:
+        focus_widget = self.focus_get()
+        if focus_widget is None:
+            return True
+        if isinstance(focus_widget, Text):
+            return False
+        if isinstance(focus_widget, (ttk.Entry, ttk.Combobox, ttk.Spinbox)):
+            return False
+        return True
+
+    def _shortcut_action(self, callback, *args):
+        if not self._shortcut_guard():
+            return None
+        callback(*args)
+        return "break"
+
+    def _move_active_encoder(self, delta: int) -> None:
+        active = self._selected_index()
+        bank_start = (active // ENCODERS_PER_BANK) * ENCODERS_PER_BANK
+        local = (active % ENCODERS_PER_BANK + delta) % ENCODERS_PER_BANK
+        next_idx = bank_start + local
+        self.selected_encoders = {next_idx}
+        self.last_selected_encoder = next_idx
+        self._set_active_index(next_idx)
+        self._load_encoder_fields_from_model()
+        self._update_knob_visuals()
+        self._draw_mini_map()
+        self._update_context_labels()
+
+    def _jump_bank_relative(self, step: int) -> None:
+        bank = max(1, min(NUM_BANKS, int(self.bank_var.get())))
+        bank = (bank - 1 + step) % NUM_BANKS + 1
+        self._set_bank_shortcut(bank)
+
+    def _set_bank_shortcut(self, bank: int) -> None:
+        active_local = self._selected_index() % ENCODERS_PER_BANK
+        target_idx = (max(1, min(NUM_BANKS, bank)) - 1) * ENCODERS_PER_BANK + active_local
+        self.selected_encoders = {target_idx}
+        self.last_selected_encoder = target_idx
+        self._set_active_index(target_idx)
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+        self._update_context_labels()
+
+    def show_keyboard_shortcuts(self) -> None:
+        lines = [
+            "Keyboard-First Editing",
+            "",
+            "Ctrl+Enter: Send Selected",
+            "Ctrl+Shift+Enter: Push Bank",
+            "Ctrl+Alt+Enter: Push All Banks",
+            "Ctrl+G: Push Global",
+            "Ctrl+L: Pull Bank",
+            "Ctrl+Shift+L: Pull All Banks",
+            "Ctrl+Shift+G: Pull Global",
+            "",
+            "Ctrl+P: Preview Diff",
+            "Ctrl+H: Heatmap Selected",
+            "Ctrl+Shift+H: Heatmap All",
+            "Ctrl+Alt+H: Clear Heatmap",
+            "",
+            "Ctrl+A: Select All In Bank",
+            "Ctrl+R: Select Row",
+            "Alt+Arrow Keys: Move active encoder in 4x4 grid",
+            "Ctrl+[ / Ctrl+]: Previous/Next bank",
+            "Ctrl+1..4: Jump to bank",
+            "",
+            "Ctrl+Shift+F: Apply Favorites",
+            "Ctrl+Shift+C: Compatibility Check",
+            "Ctrl+Shift+R: Recovery Mode",
+            "Ctrl+Shift+S: Start Sandbox",
+            "Ctrl+Shift+K: Commit Sandbox",
+            "Ctrl+Shift+D: Discard Sandbox",
+            "Ctrl+/: Show this shortcut list",
+        ]
+        self._show_report_window("Keyboard Shortcuts", lines, width=84, height=28)
 
     def _animate_selection_pulse(self) -> None:
         self.selection_pulse_phase += self.selection_pulse_dir

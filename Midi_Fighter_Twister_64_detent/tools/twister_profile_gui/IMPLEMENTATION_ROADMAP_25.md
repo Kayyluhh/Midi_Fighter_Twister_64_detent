@@ -42,7 +42,7 @@ Any agent continuing work should start here and update status/logs before and af
 17. Profile Notes and Tags - done
 18. Templates Library - done
 19. Plugin Host Bridge Presets - done
-20. Keyboard-First Editing Mode - in-progress
+20. Keyboard-First Editing Mode - done
 21. In-App Firmware Compatibility Check - done
 22. Guided Recovery Mode - done
 23. Portable Show Pack Export - done
@@ -256,3 +256,12 @@ After coding:
 - Changed files: tools/twister_profile_gui/app.py, tools/twister_profile_gui/README.md, tools/twister_profile_gui/IMPLEMENTATION_ROADMAP_25.md.
 - Validation: python3 -m py_compile tools/twister_profile_gui/app.py
 - Next planned scope: finish Feature 20 keyboard-first editing mode, then implement Feature 1 setup wizard.
+
+### 2026-03-16 (Keyboard-First Completion)
+- Planned scope: complete Feature 20 as a standalone chunk before beginning setup wizard work.
+- Implemented Feature 20: expanded keyboard-first flow for send/pull actions, preview tools, bank navigation, encoder navigation, and safety workflow actions.
+- Added shortcut guardrails so keyboard commands do not trigger while typing in text/entry/combobox/spinbox inputs.
+- Added in-app keyboard shortcut cheat sheet (`Ctrl+/`) and README shortcut reference section.
+- Changed files: tools/twister_profile_gui/app.py, tools/twister_profile_gui/README.md, tools/twister_profile_gui/IMPLEMENTATION_ROADMAP_25.md.
+- Validation: python3 -m py_compile tools/twister_profile_gui/app.py
+- Next planned scope: implement Feature 1 setup wizard.
