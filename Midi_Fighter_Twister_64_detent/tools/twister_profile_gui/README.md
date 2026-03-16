@@ -5,6 +5,7 @@ Desktop app for configuring Midi Fighter Twister profiles and LED colors via MID
 ## Features
 
 - Connect to any MIDI in/out ports exposed by the Twister.
+- First-run setup wizard for guided connection, SysEx probe, and optional full pull.
 - Pull and push global settings through Twister SysEx command 0x01/0x02.
 - Pull and push per-encoder settings for a whole bank (16 encoders) via bulk transfer command 0x04.
 - Pull and push all banks (all 64 encoders) in one action.
@@ -96,7 +97,8 @@ python3 app.py
 ## Usage
 
 1. Select Twister input/output ports and click Connect.
-2. Click Pull Global and Pull Bank (or Pull All Banks) to import current device settings.
+2. On first launch, run Setup Wizard to verify ports, run a SysEx probe, and optionally pull full device state.
+3. Click Pull Global and Pull Bank (or Pull All Banks) to import current device settings.
 3. Choose an apply scope (`All Fields`, `Colors Only`, `MIDI Only`, `Behavior Only`).
 4. In Graphical Bank View, select one or more knobs (click, drag, Shift, Cmd).
 5. Use quick tools: `Row`, `Column`, `All 16`, clipboard slots, presets, gradient/randomize/rotate.
@@ -122,6 +124,16 @@ python3 app.py
 25. Use `Export Diagnostics` to save app/MIDI/safety state and recent logs.
 26. Save full JSON or export a bank snippet JSON.
 27. Press `Ctrl+/` to open the keyboard shortcut cheat sheet.
+
+## Setup Wizard
+
+- Open `Setup Wizard` in the MIDI Connection toolbar.
+- The wizard guides you through:
+- Port confirmation
+- Device connection
+- SysEx probe (pull global response check)
+- Optional full pull (globals + all 64 encoders)
+- Completion is saved in local `app_settings.json`, and you can rerun the wizard anytime.
 
 ## Keyboard Shortcuts
 

@@ -23,7 +23,7 @@ Any agent continuing work should start here and update status/logs before and af
 
 ## Feature Matrix
 
-1. Setup Wizard - planned
+1. Setup Wizard - done
 2. Device Snapshot + Auto-Backup - done
 3. One-Click Restore Point - done
 4. Live MIDI Activity Monitor - done
@@ -265,3 +265,12 @@ After coding:
 - Changed files: tools/twister_profile_gui/app.py, tools/twister_profile_gui/README.md, tools/twister_profile_gui/IMPLEMENTATION_ROADMAP_25.md.
 - Validation: python3 -m py_compile tools/twister_profile_gui/app.py
 - Next planned scope: implement Feature 1 setup wizard.
+
+### 2026-03-16 (Setup Wizard Completion)
+- Planned scope: complete Feature 1 onboarding flow with first-run behavior and manual rerun support.
+- Implemented Feature 1: setup wizard with guided port confirmation, device connect step, SysEx pull probe, and optional full-state pull.
+- Added first-run wizard auto-launch when `wizard_completed` is not yet set; completion is persisted in `app_settings.json`.
+- Added manual `Setup Wizard` toolbar button in the MIDI connection section for rerunning onboarding at any time.
+- Changed files: tools/twister_profile_gui/app.py, tools/twister_profile_gui/README.md, tools/twister_profile_gui/IMPLEMENTATION_ROADMAP_25.md.
+- Validation: python3 -m py_compile tools/twister_profile_gui/app.py
+- Remaining roadmap scope: none (all 25 features are now marked done).

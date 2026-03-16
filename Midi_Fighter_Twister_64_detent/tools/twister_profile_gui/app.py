@@ -549,6 +549,7 @@ class TwisterGui(Tk):
         self.after(40, self._poll_events)
         self.protocol("WM_DELETE_WINDOW", self._on_close_app)
         self._register_keyboard_shortcuts()
+        self.after(550, self._maybe_launch_setup_wizard)
 
         self.bank_var.trace_add("write", self._on_var_changed)
         self.encoder_var.trace_add("write", self._on_var_changed)
@@ -720,8 +721,9 @@ class TwisterGui(Tk):
         ttk.Button(top, text="Connect", command=self.connect).grid(row=0, column=5, padx=6, pady=6)
         ttk.Button(top, text="Disconnect", command=self.disconnect).grid(row=0, column=6, padx=6, pady=6)
         ttk.Button(top, text="MIDI Monitor", command=self.open_midi_monitor).grid(row=0, column=7, padx=6, pady=6)
+        ttk.Button(top, text="Setup Wizard", command=lambda: self.open_setup_wizard(force=True)).grid(row=0, column=8, padx=6, pady=6)
 
-        ttk.Label(top, textvariable=self.status_var).grid(row=0, column=8, padx=8, pady=6, sticky="w")
+        ttk.Label(top, textvariable=self.status_var).grid(row=0, column=9, padx=8, pady=6, sticky="w")
 
         body = ttk.Panedwindow(root, orient="horizontal")
         body.pack(fill=BOTH, expand=True)
@@ -1012,6 +1014,114 @@ class TwisterGui(Tk):
     def disconnect(self) -> None:
         self.client.disconnect()
         self.status_var.set("Disconnected")
+
+    def _maybe_launch_setup_wizard(self) -> None:
+        if self.wizard_completed:
+            return
+        self.open_setup_wizard(force=False)
+
+    def _run_sysex_probe(self, timeout_s: float = 1.8) -> bool:
+        try:
+            self.client.pull_global_config()
+        except Exception:
+            return False
+
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            saw_probe = False
+            while True:
+                try:
+                    event = self.events.get_nowait()
+                except queue.Empty:
+                    break
+                if event.get("type") == "sysex" and event.get("command") == SYSEX_COMMAND_PULL_CONF:
+                    saw_probe = True
+                self._handle_event(event)
+            if saw_probe:
+                return True
+            time.sleep(0.01)
+        return False
+
+    def open_setup_wizard(self, force: bool = False) -> None:
+        if self.wizard_completed and not force:
+            return
+
+        self.refresh_ports()
+        inputs = list(self.input_combo["values"])
+        outputs = list(self.output_combo["values"])
+        if not inputs or not outputs:
+            messagebox.showwarning(
+                "Setup Wizard",
+                "No MIDI input/output ports found. Connect the Twister and click Refresh Ports, then run Setup Wizard again.",
+            )
+            return
+
+        if not self.input_port_var.get():
+            self.input_port_var.set(inputs[0])
+        if not self.output_port_var.get():
+            self.output_port_var.set(outputs[0])
+
+        intro = (
+            "Setup Wizard will help you connect and pull a safe baseline from your Twister.\n\n"
+            "Steps:\n"
+            "1) Confirm MIDI ports\n"
+            "2) Connect\n"
+            "3) Run SysEx probe\n"
+            "4) Optionally pull globals + all 64 encoders\n\n"
+            "Continue?"
+        )
+        if not messagebox.askyesno("Setup Wizard", intro):
+            return
+
+        messagebox.showinfo(
+            "Setup Wizard",
+            (
+                "Verify the selected ports in the MIDI Connection section.\n\n"
+                f"Input: {self.input_port_var.get()}\n"
+                f"Output: {self.output_port_var.get()}"
+            ),
+        )
+
+        try:
+            if not self.client.connected:
+                self.client.connect(self.input_port_var.get(), self.output_port_var.get())
+                self.status_var.set("Connected")
+        except Exception as exc:
+            messagebox.showerror("Setup Wizard", f"Could not connect:\n{exc}")
+            return
+
+        probe_ok = self._run_sysex_probe()
+        probe_line = "SysEx probe: OK" if probe_ok else "SysEx probe: no response detected"
+        if not probe_ok and not messagebox.askyesno(
+            "Setup Wizard",
+            "No SysEx response was detected during probe. Continue anyway and try full pull?",
+        ):
+            return
+
+        pulled_full = False
+        if messagebox.askyesno("Setup Wizard", "Pull globals + all 64 encoders now?"):
+            if not self._prepare_for_device_pull("Setup Wizard Pull"):
+                return
+            try:
+                self._pull_full_device_state()
+                pulled_full = True
+            except Exception as exc:
+                messagebox.showerror("Setup Wizard", f"Pull failed:\n{exc}")
+                return
+
+        self.wizard_completed = True
+        self._save_app_settings()
+
+        lines = [
+            "Setup Wizard Complete",
+            "",
+            f"Connection: {self.input_port_var.get()} -> {self.output_port_var.get()}",
+            probe_line,
+            f"Full pull: {'completed' if pulled_full else 'skipped'}",
+            "",
+            "You can rerun Setup Wizard anytime from the MIDI Connection toolbar.",
+        ]
+        self._show_report_window("Setup Wizard", lines, width=82, height=18)
 
     def _selected_index(self) -> int:
         bank = max(1, min(NUM_BANKS, int(self.bank_var.get())))
