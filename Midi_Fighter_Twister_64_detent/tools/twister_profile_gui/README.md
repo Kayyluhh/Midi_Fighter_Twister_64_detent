@@ -11,6 +11,10 @@ Desktop app for configuring Midi Fighter Twister profiles and LED colors via MID
 - Live MIDI monitor for outgoing and incoming SysEx activity.
 - Diagnostics report export for support and troubleshooting.
 - Performance mode with configurable transfer delay and retry for bulk operations.
+- Firmware compatibility check based on the profile's target firmware.
+- Guided recovery mode for reconnect, repull, validation, and snapshot recovery.
+- Session sandbox with explicit commit/discard controls before device writes.
+- Local app settings persistence for safety and editing preferences.
 - Push preview heatmap for selected or all encoders.
 - Favorites and lock-fields controls for safer, faster batch editing.
 - Color theme packs for quick visual styling.
@@ -99,20 +103,23 @@ python3 app.py
 7. Use Preview Diff to inspect changes vs last pulled hardware state.
 8. Send Selected, Push Bank, or Push All Banks (supports Dry Run and confirmation threshold).
 9. Use `Restore Last Snapshot` for quick rollback if needed.
-10. Open `MIDI Monitor` to inspect SysEx TX/RX stream.
-11. Use `Heatmap Selected` or `Heatmap All` to preview where pushes will change values.
-12. Mark fields as `Fav` and/or `Lock`, then use `Apply Favorites` for quick targeted edits.
-13. Apply a `Theme Pack` and/or run an `Auto-Color Rule` on selected knobs or all 64.
-14. Use `Macros` for fast channel increment, CC span remap, or CC invert transforms.
-15. Use `Convert Rel/Abs` to switch selected encoders between absolute and relative mode.
-16. Use `Compare Profile` to inspect differences against another profile file.
-17. Use `Merge Profile` to combine incoming profile data with current edits.
-18. Use `Profile Metadata` to store notes, tags, firmware target, and sharing context inside the profile.
-19. Apply a built-in `Template` or import a custom template JSON.
-20. Use `Export Host Bridge` to generate host-specific setup notes and encoder mapping summaries.
-21. Use `Export Show Pack` to bundle profile + presets + metadata with integrity checks.
-22. Use `Export Diagnostics` to save app/MIDI/safety state and recent logs.
-23. Save full JSON or export a bank snippet JSON.
+10. Run `Compat Check` before pushing if you want a full firmware-target report.
+11. Use `Start Sandbox` to make temporary edits that cannot reach hardware until you explicitly commit them.
+12. Open `Recovery Mode` for reconnect, full repull, validation, and optional snapshot restore guidance.
+13. Open `MIDI Monitor` to inspect SysEx TX/RX stream.
+14. Use `Heatmap Selected` or `Heatmap All` to preview where pushes will change values.
+15. Mark fields as `Fav` and/or `Lock`, then use `Apply Favorites` for quick targeted edits.
+16. Apply a `Theme Pack` and/or run an `Auto-Color Rule` on selected knobs or all 64.
+17. Use `Macros` for fast channel increment, CC span remap, or CC invert transforms.
+18. Use `Convert Rel/Abs` to switch selected encoders between absolute and relative mode.
+19. Use `Compare Profile` to inspect differences against another profile file.
+20. Use `Merge Profile` to combine incoming profile data with current edits.
+21. Use `Profile Metadata` to store notes, tags, firmware target, and sharing context inside the profile.
+22. Apply a built-in `Template` or import a custom template JSON.
+23. Use `Export Host Bridge` to generate host-specific setup notes and encoder mapping summaries.
+24. Use `Export Show Pack` to bundle profile + presets + metadata with integrity checks.
+25. Use `Export Diagnostics` to save app/MIDI/safety state and recent logs.
+26. Save full JSON or export a bank snippet JSON.
 
 ## Portable Show Pack
 
@@ -140,7 +147,11 @@ python3 app.py
 - `Confirm >= N`: asks for confirmation when sending to `N` or more encoders.
 - `Performance Mode`: allows tuned send/pull pacing and short retries to improve reliability.
 - `Drift Check`: preflight pull detects device-side changes since last baseline and asks before overwrite.
+- `Compat Check`: warns when the profile targets firmware that cannot represent some globals or encoder settings.
+- `Recovery Mode`: reconnects, repulls the full device, summarizes validation/compatibility results, and offers snapshot recovery.
+- `Session Sandbox`: blocks hardware writes until temporary edits are committed or discarded.
 - `Validation Guardrails`: blocks invalid channel/range combinations and prompts on risky settings.
+- App preferences for safety, themes, port selection, and favorite/lock fields are saved locally in `app_settings.json`.
 
 ## macOS App Bundle
 

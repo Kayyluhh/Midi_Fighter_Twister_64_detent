@@ -106,13 +106,15 @@ FIRMWARE_CAPABILITIES: dict[str, dict[str, object]] = {
     },
     "legacy-v1": {
         "label": "Legacy V1",
-        "unsupported_globals": ["bank_wrap_mode", "shift_page_latch"],
+        "unsupported_globals": ["bank_wrap_mode", "shift_page_latch", "detent_size"],
         "max_indicator_display_type": 2,
         "max_movement": 1,
         "max_encoder_midi_type": 2,
         "supports_shift_channel": False,
     },
 }
+
+APP_SETTINGS_VERSION = 1
 
 
 def clamp7(value: int) -> int:
@@ -497,6 +499,7 @@ class TwisterGui(Tk):
         self.copied_encoder: EncoderConfig | None = None
         self.clipboard_slot_var = IntVar(value=1)
         self.clipboard_slots: dict[int, EncoderConfig | None] = {1: None, 2: None, 3: None, 4: None}
+        self.settings_file = Path(__file__).with_name("app_settings.json")
         self.preset_file = Path(__file__).with_name("presets.json")
         self.backup_dir = Path(__file__).with_name("backups")
         self.template_dir = Path(__file__).with_name("templates")
@@ -518,11 +521,19 @@ class TwisterGui(Tk):
         self.selection_pulse_dir = 1
         self.heatmap_scores: dict[int, int] = {}
         self.heatmap_scope_var = StringVar(value="None")
+        self.sandbox_status_var = StringVar(value="Sandbox: off")
+        self.sandbox_active = False
+        self.sandbox_base_profile: dict | None = None
+        self.sandbox_base_presets: dict[str, dict] | None = None
+        self.wizard_completed = False
+        self._loading_app_settings = False
         self.midi_monitor_window: Toplevel | None = None
         self.midi_monitor_text: Text | None = None
         self.midi_log_enabled = BooleanVar(value=True)
         self.midi_log_lines: list[str] = []
         self.midi_log_max_lines = 800
+
+        self._load_app_settings()
 
         self._build_ui()
         self.refresh_ports()
@@ -533,11 +544,31 @@ class TwisterGui(Tk):
         self._update_context_labels()
         self._refresh_library_state()
         self._update_metadata_summary()
+        self._update_sandbox_status()
         self._animate_selection_pulse()
         self.after(40, self._poll_events)
+        self.protocol("WM_DELETE_WINDOW", self._on_close_app)
 
         self.bank_var.trace_add("write", self._on_var_changed)
         self.encoder_var.trace_add("write", self._on_var_changed)
+        for var in (
+            self.input_port_var,
+            self.output_port_var,
+            self.apply_scope_var,
+            self.dry_run_var,
+            self.confirm_threshold_var,
+            self.performance_mode_var,
+            self.performance_delay_ms_var,
+            self.performance_retry_var,
+            self.theme_pack_var,
+            self.auto_color_rule_var,
+            self.clipboard_slot_var,
+            self.midi_log_enabled,
+        ):
+            var.trace_add("write", self._on_preferences_changed)
+        for key in ENCODER_TAGS:
+            self.favorite_fields_var[key].trace_add("write", self._on_preferences_changed)
+            self.lock_fields_var[key].trace_add("write", self._on_preferences_changed)
         self.bind("<Command-z>", lambda _e: self.undo())
         self.bind("<Command-Z>", lambda _e: self.redo())
         self.bind("<Control-z>", lambda _e: self.undo())
@@ -643,6 +674,14 @@ class TwisterGui(Tk):
         ttk.Spinbox(safety, from_=0, to=30, width=4, textvariable=self.performance_delay_ms_var).pack(side=LEFT)
         ttk.Label(safety, text="Retry").pack(side=LEFT, padx=(8, 2))
         ttk.Spinbox(safety, from_=0, to=3, width=3, textvariable=self.performance_retry_var).pack(side=LEFT)
+        ttk.Separator(safety, orient="vertical").pack(side=LEFT, fill=Y, padx=10)
+        ttk.Button(safety, text="Compat Check", command=self.show_firmware_compatibility_report).pack(side=LEFT, padx=4)
+        ttk.Button(safety, text="Recovery Mode", command=self.guided_recovery_mode).pack(side=LEFT, padx=4)
+        ttk.Separator(safety, orient="vertical").pack(side=LEFT, fill=Y, padx=10)
+        ttk.Button(safety, text="Start Sandbox", command=self.start_sandbox).pack(side=LEFT, padx=4)
+        ttk.Button(safety, text="Commit Sandbox", command=self.commit_sandbox).pack(side=LEFT, padx=4)
+        ttk.Button(safety, text="Discard Sandbox", command=self.discard_sandbox).pack(side=LEFT, padx=4)
+        ttk.Label(safety, textvariable=self.sandbox_status_var).pack(side=LEFT, padx=(8, 0))
 
         quick = ttk.Frame(profile_frame)
         quick.pack(fill=X, padx=8, pady=(6, 4))
@@ -991,9 +1030,11 @@ class TwisterGui(Tk):
         enc = idx % ENCODERS_PER_BANK + 1
         fav_count = sum(1 for name in ENCODER_TAGS if self.favorite_fields_var[name].get())
         locked_count = sum(1 for name in ENCODER_TAGS if self.lock_fields_var[name].get())
+        sandbox_label = "active" if self.sandbox_active else "off"
         self.context_var.set(
             f"Active Bank: {bank}   Active Encoder: {enc}   Active Tag: {idx + 1}   "
-            f"Scope: {self.apply_scope_var.get()}   Favorites: {fav_count}   Locked: {locked_count}"
+            f"Scope: {self.apply_scope_var.get()}   Favorites: {fav_count}   Locked: {locked_count}   "
+            f"Firmware: {self.profile.metadata.firmware}   Sandbox: {sandbox_label}"
         )
 
         current_bank = bank - 1
@@ -1123,6 +1164,7 @@ class TwisterGui(Tk):
     def _mark_profile_updated(self) -> None:
         self.profile.metadata.mark_updated()
         self._update_metadata_summary()
+        self._update_context_labels()
 
     def _update_metadata_summary(self) -> None:
         metadata = self.profile.metadata
@@ -1131,6 +1173,271 @@ class TwisterGui(Tk):
         self.metadata_summary_var.set(
             f"Profile: {metadata.name}   Firmware: {metadata.firmware}   Tags: {tags}   Template: {source}"
         )
+
+    def _update_sandbox_status(self) -> None:
+        if self.sandbox_active:
+            self.sandbox_status_var.set("Sandbox: active, device writes blocked")
+        else:
+            self.sandbox_status_var.set("Sandbox: off")
+
+    def _clone_named_presets(self) -> dict[str, dict]:
+        return json.loads(json.dumps(self.named_presets))
+
+    def _summarize_encoder_targets(self, indices: list[int], limit: int = 6) -> str:
+        labels = [self._encoder_label(idx) for idx in indices[:limit]]
+        if len(indices) > limit:
+            labels.append(f"+{len(indices) - limit} more")
+        return ", ".join(labels)
+
+    def _compatibility_findings(self, targets: list[int], include_globals: bool = True, profile: Profile | None = None) -> list[str]:
+        current_profile = profile or self.profile
+        target_id = str(current_profile.metadata.firmware or "open-source-default").strip() or "open-source-default"
+        caps = FIRMWARE_CAPABILITIES.get(target_id)
+        if caps is None:
+            return [f"Unknown firmware target '{target_id}'. Compatibility rules are unavailable for this profile."]
+
+        findings: list[str] = []
+        label = str(caps.get("label") or target_id)
+        default_profile = Profile()
+
+        if include_globals:
+            unsupported_globals: list[str] = []
+            for key in caps.get("unsupported_globals", []):
+                value = clamp7(current_profile.globals.get(key, default_profile.globals.get(key, 0)))
+                default_value = clamp7(default_profile.globals.get(key, 0))
+                if value != default_value:
+                    unsupported_globals.append(f"{key}={value}")
+            if unsupported_globals:
+                findings.append(f"{label} does not support globals: {', '.join(unsupported_globals)}.")
+
+        indicator_limit = int(caps.get("max_indicator_display_type", 3))
+        movement_limit = int(caps.get("max_movement", 2))
+        midi_type_limit = int(caps.get("max_encoder_midi_type", 5))
+        supports_shift_channel = bool(caps.get("supports_shift_channel", True))
+
+        indicator_issues: list[int] = []
+        movement_issues: list[int] = []
+        midi_type_issues: list[int] = []
+        shift_channel_issues: list[int] = []
+
+        for idx in targets:
+            cfg = current_profile.encoders[idx]
+            default_cfg = default_profile.encoders[idx]
+            if cfg.indicator_display_type > indicator_limit:
+                indicator_issues.append(idx)
+            if cfg.movement > movement_limit:
+                movement_issues.append(idx)
+            if cfg.encoder_midi_type > midi_type_limit:
+                midi_type_issues.append(idx)
+            if not supports_shift_channel and cfg.encoder_shift_midi_channel != default_cfg.encoder_shift_midi_channel:
+                shift_channel_issues.append(idx)
+
+        if indicator_issues:
+            findings.append(
+                f"{len(indicator_issues)} encoder(s) use indicator_display_type above {indicator_limit}: {self._summarize_encoder_targets(indicator_issues)}."
+            )
+        if movement_issues:
+            findings.append(
+                f"{len(movement_issues)} encoder(s) use movement above {movement_limit}: {self._summarize_encoder_targets(movement_issues)}."
+            )
+        if midi_type_issues:
+            findings.append(
+                f"{len(midi_type_issues)} encoder(s) use encoder_midi_type above {midi_type_limit}: {self._summarize_encoder_targets(midi_type_issues)}."
+            )
+        if shift_channel_issues:
+            findings.append(
+                f"{len(shift_channel_issues)} encoder(s) set encoder_shift_midi_channel on firmware without shift-channel support: {self._summarize_encoder_targets(shift_channel_issues)}."
+            )
+
+        return findings
+
+    def _show_report_window(self, title: str, lines: list[str], width: int = 96, height: int = 28) -> None:
+        win = Toplevel(self)
+        win.title(title)
+        txt = Text(win, wrap="word", width=width, height=height)
+        txt.pack(fill=BOTH, expand=True, padx=8, pady=8)
+        txt.insert("1.0", "\n".join(lines))
+        txt.configure(state="disabled")
+
+    def show_firmware_compatibility_report(self) -> None:
+        self._sync_globals_from_ui()
+        findings = self._compatibility_findings(list(range(TOTAL_ENCODERS)), include_globals=True)
+        target_id = str(self.profile.metadata.firmware or "open-source-default").strip() or "open-source-default"
+        label = str(FIRMWARE_CAPABILITIES.get(target_id, {}).get("label") or target_id)
+        lines = [
+            "Firmware Compatibility Check",
+            "",
+            f"Target: {label} ({target_id})",
+            f"Globals checked: {len(GLOBAL_TAGS)}",
+            f"Encoders checked: {TOTAL_ENCODERS}",
+            "",
+        ]
+        if findings:
+            lines.append("Warnings")
+            lines.extend([f"- {line}" for line in findings])
+        else:
+            lines.append("No compatibility warnings detected for the current profile.")
+        self._show_report_window("Firmware Compatibility", lines, width=100, height=24)
+
+    def start_sandbox(self) -> None:
+        if self.sandbox_active:
+            messagebox.showinfo("Sandbox", "Sandbox is already active.")
+            return
+        self.sandbox_base_profile = self.profile.to_json_dict()
+        self.sandbox_base_presets = self._clone_named_presets()
+        self.sandbox_active = True
+        self._update_sandbox_status()
+        self._update_context_labels()
+        self.status_var.set("Sandbox started. Device writes are blocked until you commit or discard.")
+
+    def commit_sandbox(self, silent: bool = False) -> bool:
+        if not self.sandbox_active:
+            if not silent:
+                messagebox.showinfo("Sandbox", "Sandbox is not active.")
+            return False
+        self._mark_profile_updated()
+        self.sandbox_active = False
+        self.sandbox_base_profile = None
+        self.sandbox_base_presets = None
+        self._save_named_presets(persist=True)
+        self._update_sandbox_status()
+        self._update_context_labels()
+        self.status_var.set("Sandbox committed.")
+        if not silent:
+            messagebox.showinfo("Sandbox", "Sandbox changes committed.")
+        return True
+
+    def discard_sandbox(self, silent: bool = False, force: bool = False) -> bool:
+        if not self.sandbox_active:
+            if not silent:
+                messagebox.showinfo("Sandbox", "Sandbox is not active.")
+            return False
+        if not force and not messagebox.askyesno(
+            "Discard Sandbox",
+            "Discard all temporary sandbox edits and restore the last committed editor state?",
+        ):
+            return False
+
+        if self.sandbox_base_profile is not None:
+            self._restore_profile_from_dict(self.sandbox_base_profile)
+        if self.sandbox_base_presets is not None:
+            self.named_presets = self._sanitize_named_presets(self.sandbox_base_presets)
+            self._save_named_presets(persist=True)
+
+        self.sandbox_active = False
+        self.sandbox_base_profile = None
+        self.sandbox_base_presets = None
+        self._update_sandbox_status()
+        self._update_context_labels()
+        self.status_var.set("Sandbox discarded.")
+        if not silent:
+            messagebox.showinfo("Sandbox", "Sandbox changes discarded.")
+        return True
+
+    def _guard_sandbox_before_device_write(self, label: str) -> bool:
+        if not self.sandbox_active:
+            return True
+        messagebox.showwarning(
+            "Sandbox Active",
+            f"{label}: sandbox edits are temporary. Use Commit Sandbox or Discard Sandbox before sending to the device.",
+        )
+        return False
+
+    def _prepare_for_device_pull(self, label: str) -> bool:
+        if not self.sandbox_active:
+            return True
+        if not messagebox.askyesno(
+            "Sandbox Active",
+            f"{label}: pulling from the device will discard current sandbox edits. Discard sandbox and continue?",
+        ):
+            return False
+        return self.discard_sandbox(silent=True, force=True)
+
+    def _flush_midi_updates(self, timeout_s: float = 1.0) -> None:
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            self._drain_event_queue()
+            time.sleep(0.01)
+        self._drain_event_queue()
+
+    def _pull_full_device_state(self) -> None:
+        self.client.pull_global_config()
+        delay_s = self._transfer_delay_seconds(0.008)
+        if delay_s > 0:
+            time.sleep(delay_s)
+        for idx in range(TOTAL_ENCODERS):
+            self.client.pull_encoder(idx + 1)
+            if delay_s > 0:
+                time.sleep(delay_s)
+        self._flush_midi_updates(1.0)
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+        self._update_context_labels()
+        self._update_metadata_summary()
+
+    def guided_recovery_mode(self) -> None:
+        if not self.input_port_var.get() or not self.output_port_var.get():
+            self.refresh_ports()
+        if not self.input_port_var.get() or not self.output_port_var.get():
+            messagebox.showwarning("Recovery Mode", "Select MIDI input and output ports first.")
+            return
+
+        prompt = (
+            "Reconnect and repull globals + all 64 encoders from the selected ports?"
+            if not self.client.connected
+            else "Repull globals + all 64 encoders from the connected device and run recovery checks?"
+        )
+        if not messagebox.askyesno("Recovery Mode", prompt):
+            return
+        if not self._prepare_for_device_pull("Recovery Mode"):
+            return
+
+        try:
+            if not self.client.connected:
+                self.client.connect(self.input_port_var.get(), self.output_port_var.get())
+                self.status_var.set("Connected")
+            self._pull_full_device_state()
+        except Exception as exc:
+            messagebox.showerror("Recovery Mode", str(exc))
+            return
+
+        validation_errors, validation_warnings = self._validate_profile_for_send(list(range(TOTAL_ENCODERS)), include_globals=True)
+        compatibility_warnings = self._compatibility_findings(list(range(TOTAL_ENCODERS)), include_globals=True)
+        snapshot_path = self._latest_snapshot_path()
+
+        lines = [
+            "Guided Recovery Summary",
+            "",
+            f"Connection: {self.input_port_var.get()} -> {self.output_port_var.get()}",
+            "Repull: globals + 64 encoders completed.",
+            f"Latest snapshot: {snapshot_path.name if snapshot_path is not None else 'none'}",
+            "",
+        ]
+
+        if validation_errors:
+            lines.append("Validation Errors")
+            lines.extend([f"- {line}" for line in validation_errors])
+            lines.append("")
+        if validation_warnings:
+            lines.append("Validation Warnings")
+            lines.extend([f"- {line}" for line in validation_warnings])
+            lines.append("")
+        if compatibility_warnings:
+            lines.append("Compatibility Warnings")
+            lines.extend([f"- {line}" for line in compatibility_warnings])
+            lines.append("")
+        if not validation_errors and not validation_warnings and not compatibility_warnings:
+            lines.append("No validation or compatibility issues detected after the repull.")
+
+        self._show_report_window("Guided Recovery", lines, width=104, height=26)
+        self.status_var.set("Recovery pull complete. Review the recovery report.")
+
+        if snapshot_path is not None and messagebox.askyesno(
+            "Recovery Mode",
+            f"Latest snapshot found:\n{snapshot_path.name}\n\nRestore it into the editor now?",
+        ):
+            self.restore_last_snapshot()
 
     def _apply_profile_object(self, profile: Profile) -> None:
         self.profile = Profile.from_json_dict(profile.to_json_dict())
@@ -1198,7 +1505,7 @@ class TwisterGui(Tk):
         ttk.Label(form, text="Tags").grid(row=1, column=0, sticky="w", padx=4, pady=4)
         ttk.Entry(form, textvariable=tags_var, width=48).grid(row=1, column=1, sticky="ew", padx=4, pady=4)
         ttk.Label(form, text="Firmware").grid(row=2, column=0, sticky="w", padx=4, pady=4)
-        ttk.Entry(form, textvariable=firmware_var, width=48).grid(row=2, column=1, sticky="ew", padx=4, pady=4)
+        ttk.Combobox(form, textvariable=firmware_var, values=sorted(FIRMWARE_CAPABILITIES.keys()), width=45).grid(row=2, column=1, sticky="ew", padx=4, pady=4)
         ttk.Label(form, text="Notes").grid(row=3, column=0, sticky="nw", padx=4, pady=4)
 
         notes_text = Text(form, wrap="word", width=56, height=14)
@@ -1275,6 +1582,98 @@ class TwisterGui(Tk):
         except Exception as exc:
             messagebox.showerror("Template Error", str(exc))
 
+    def _load_app_settings(self) -> None:
+        self._loading_app_settings = True
+        try:
+            if not self.settings_file.exists():
+                return
+            raw = json.loads(self.settings_file.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return
+
+            input_port = raw.get("input_port")
+            output_port = raw.get("output_port")
+            apply_scope = raw.get("apply_scope")
+            theme_pack = raw.get("theme_pack")
+            auto_color_rule = raw.get("auto_color_rule")
+            clipboard_slot = raw.get("clipboard_slot")
+
+            if isinstance(input_port, str):
+                self.input_port_var.set(input_port)
+            if isinstance(output_port, str):
+                self.output_port_var.set(output_port)
+            if apply_scope in SCOPE_FIELDS:
+                self.apply_scope_var.set(apply_scope)
+            if theme_pack in THEME_PACKS:
+                self.theme_pack_var.set(theme_pack)
+            if auto_color_rule in {"By MIDI Channel", "By MIDI Type", "By CC Range"}:
+                self.auto_color_rule_var.set(auto_color_rule)
+            if isinstance(clipboard_slot, int):
+                self.clipboard_slot_var.set(max(1, min(4, clipboard_slot)))
+
+            self.dry_run_var.set(bool(raw.get("dry_run", self.dry_run_var.get())))
+            self.confirm_threshold_var.set(max(1, int(raw.get("confirm_threshold", self.confirm_threshold_var.get()))))
+            self.performance_mode_var.set(bool(raw.get("performance_mode", self.performance_mode_var.get())))
+            self.performance_delay_ms_var.set(max(0, int(raw.get("performance_delay_ms", self.performance_delay_ms_var.get()))))
+            self.performance_retry_var.set(max(0, min(3, int(raw.get("performance_retry", self.performance_retry_var.get())))))
+            self.midi_log_enabled.set(bool(raw.get("midi_log_enabled", self.midi_log_enabled.get())))
+            self.wizard_completed = bool(raw.get("wizard_completed", False))
+
+            favorite_fields = raw.get("favorite_fields") if isinstance(raw.get("favorite_fields"), dict) else {}
+            lock_fields = raw.get("lock_fields") if isinstance(raw.get("lock_fields"), dict) else {}
+            for key in ENCODER_TAGS:
+                self.favorite_fields_var[key].set(bool(favorite_fields.get(key, False)))
+                self.lock_fields_var[key].set(bool(lock_fields.get(key, False)))
+        except Exception:
+            pass
+        finally:
+            self._loading_app_settings = False
+
+    def _app_settings_payload(self) -> dict:
+        return {
+            "version": APP_SETTINGS_VERSION,
+            "input_port": self.input_port_var.get(),
+            "output_port": self.output_port_var.get(),
+            "apply_scope": self.apply_scope_var.get(),
+            "dry_run": bool(self.dry_run_var.get()),
+            "confirm_threshold": int(self.confirm_threshold_var.get()),
+            "performance_mode": bool(self.performance_mode_var.get()),
+            "performance_delay_ms": int(self.performance_delay_ms_var.get()),
+            "performance_retry": int(self.performance_retry_var.get()),
+            "theme_pack": self.theme_pack_var.get(),
+            "auto_color_rule": self.auto_color_rule_var.get(),
+            "clipboard_slot": int(self.clipboard_slot_var.get()),
+            "midi_log_enabled": bool(self.midi_log_enabled.get()),
+            "wizard_completed": bool(self.wizard_completed),
+            "favorite_fields": {key: bool(self.favorite_fields_var[key].get()) for key in ENCODER_TAGS},
+            "lock_fields": {key: bool(self.lock_fields_var[key].get()) for key in ENCODER_TAGS},
+        }
+
+    def _save_app_settings(self) -> None:
+        if self._loading_app_settings:
+            return
+        try:
+            self.settings_file.write_text(json.dumps(self._app_settings_payload(), indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _on_preferences_changed(self, *_args) -> None:
+        if self._loading_app_settings:
+            return
+        self._update_context_labels()
+        self._save_app_settings()
+
+    def _on_close_app(self) -> None:
+        if self.sandbox_active and not messagebox.askyesno(
+            "Sandbox Active",
+            "Discard current sandbox edits and quit?",
+        ):
+            return
+        if self.sandbox_active:
+            self.discard_sandbox(silent=True, force=True)
+        self._save_app_settings()
+        self.destroy()
+
     def _load_named_presets(self) -> dict:
         if not self.preset_file.exists():
             return {}
@@ -1286,9 +1685,13 @@ class TwisterGui(Tk):
             pass
         return {}
 
-    def _save_named_presets(self) -> None:
-        self.preset_file.write_text(json.dumps(self.named_presets, indent=2), encoding="utf-8")
-        self.preset_combo["values"] = sorted(self.named_presets.keys())
+    def _save_named_presets(self, persist: bool | None = None) -> None:
+        if persist is None:
+            persist = not self.sandbox_active
+        if persist:
+            self.preset_file.write_text(json.dumps(self.named_presets, indent=2), encoding="utf-8")
+        if self.preset_combo is not None:
+            self.preset_combo["values"] = sorted(self.named_presets.keys())
 
     def save_named_preset(self) -> None:
         name = self.preset_name_var.get().strip()
@@ -1878,6 +2281,8 @@ class TwisterGui(Tk):
 
     def pull_global(self) -> None:
         try:
+            if not self._prepare_for_device_pull("Pull Global"):
+                return
             self.client.pull_global_config()
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
@@ -1934,6 +2339,7 @@ class TwisterGui(Tk):
         if errors:
             messagebox.showerror("Validation Failed", f"{label}\n\n" + "\n".join(errors[:20]))
             return False
+        warnings.extend(self._compatibility_findings(targets, include_globals=include_globals))
         if warnings:
             return messagebox.askyesno(
                 "Validation Warning",
@@ -1955,6 +2361,8 @@ class TwisterGui(Tk):
         self._load_encoder_fields_from_model()
         self._draw_knob_grid()
         self._draw_mini_map()
+        self._update_metadata_summary()
+        self._update_context_labels()
 
     def _preflight_drift_warning(self, targets: list[int], label: str) -> bool:
         if not self.client.connected or self.dry_run_var.get():
@@ -2114,6 +2522,8 @@ class TwisterGui(Tk):
 
     def push_global(self) -> None:
         try:
+            if not self._guard_sandbox_before_device_write("Push Global"):
+                return
             self._sync_globals_from_ui()
             if not self._run_send_validation(list(range(TOTAL_ENCODERS)), "Push Global", include_globals=True):
                 return
@@ -2125,6 +2535,8 @@ class TwisterGui(Tk):
 
     def pull_bank(self) -> None:
         try:
+            if not self._prepare_for_device_pull("Pull Bank"):
+                return
             bank = max(1, min(NUM_BANKS, int(self.bank_var.get()))) - 1
             delay_s = self._transfer_delay_seconds(0.01)
             for idx in self._target_indices_for_bank(bank):
@@ -2136,6 +2548,8 @@ class TwisterGui(Tk):
 
     def push_bank(self) -> None:
         try:
+            if not self._guard_sandbox_before_device_write("Push Bank"):
+                return
             self._apply_encoder_fields_to_model()
             self._sync_globals_from_ui()
             bank = max(1, min(NUM_BANKS, int(self.bank_var.get()))) - 1
@@ -2158,6 +2572,8 @@ class TwisterGui(Tk):
 
     def pull_all_banks(self) -> None:
         try:
+            if not self._prepare_for_device_pull("Pull All Banks"):
+                return
             delay_s = self._transfer_delay_seconds(0.008)
             for idx in range(TOTAL_ENCODERS):
                 self.client.pull_encoder(idx + 1)
@@ -2168,6 +2584,8 @@ class TwisterGui(Tk):
 
     def push_all_banks(self) -> None:
         try:
+            if not self._guard_sandbox_before_device_write("Push All Banks"):
+                return
             self._apply_encoder_fields_to_model()
             self._sync_globals_from_ui()
             targets = list(range(TOTAL_ENCODERS))
@@ -2189,6 +2607,8 @@ class TwisterGui(Tk):
 
     def push_selected_encoder(self) -> None:
         try:
+            if not self._guard_sandbox_before_device_write("Send Selected"):
+                return
             self._apply_encoder_fields_to_model()
             self._sync_globals_from_ui()
             targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
@@ -2794,6 +3214,11 @@ class TwisterGui(Tk):
             "safety": {
                 "dry_run": bool(self.dry_run_var.get()),
                 "confirm_threshold": int(self.confirm_threshold_var.get()),
+                "sandbox_active": bool(self.sandbox_active),
+            },
+            "compatibility": {
+                "target": self.profile.metadata.firmware,
+                "findings": self._compatibility_findings(list(range(TOTAL_ENCODERS)), include_globals=True),
             },
             "globals": self.profile.globals,
             "recent_midi_log": self.midi_log_lines[-200:],

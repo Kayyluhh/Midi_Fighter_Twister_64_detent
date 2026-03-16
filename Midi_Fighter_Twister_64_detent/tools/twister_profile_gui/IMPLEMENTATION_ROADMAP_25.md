@@ -43,10 +43,10 @@ Any agent continuing work should start here and update status/logs before and af
 18. Templates Library - done
 19. Plugin Host Bridge Presets - done
 20. Keyboard-First Editing Mode - in-progress
-21. In-App Firmware Compatibility Check - planned
-22. Guided Recovery Mode - planned
+21. In-App Firmware Compatibility Check - done
+22. Guided Recovery Mode - done
 23. Portable Show Pack Export - done
-24. Session Sandbox - planned
+24. Session Sandbox - done
 25. Diagnostics Report Generator - done
 
 ## Delivery Phases
@@ -244,3 +244,15 @@ After coding:
 - Implemented Feature 23: portable show pack export/import with metadata retention and checksum verification.
 - Changed files: tools/twister_profile_gui/app.py, tools/twister_profile_gui/README.md, tools/twister_profile_gui/templates/*.json, tools/twister_profile_gui/host_presets/*.json.
 - Validation: VS Code Problems check on tools/twister_profile_gui/app.py returned no errors.
+- Next planned scope: safety workflow features 21, 22, and 24, plus app settings persistence needed to support them.
+
+### 2026-03-16 (Follow-up Session)
+- Planned scope: complete the remaining safety workflow cluster before returning to keyboard-first editing and setup wizard work.
+- Targeted features set to in-progress: 21 In-App Firmware Compatibility Check, 22 Guided Recovery Mode, 24 Session Sandbox.
+- Implemented Feature 21: firmware compatibility report and preflight warnings based on profile firmware target and known capability rules.
+- Implemented Feature 22: guided recovery flow with reconnect, full repull, validation summary, compatibility report, and snapshot restore prompt.
+- Implemented Feature 24: session sandbox with start/commit/discard actions and write-blocking while temporary edits are active.
+- Added app settings persistence for safety and editing preferences needed by the new workflow.
+- Changed files: tools/twister_profile_gui/app.py, tools/twister_profile_gui/README.md, tools/twister_profile_gui/IMPLEMENTATION_ROADMAP_25.md.
+- Validation: python3 -m py_compile tools/twister_profile_gui/app.py
+- Next planned scope: finish Feature 20 keyboard-first editing mode, then implement Feature 1 setup wizard.
