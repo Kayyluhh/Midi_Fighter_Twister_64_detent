@@ -26,6 +26,17 @@ Desktop app for configuring Midi Fighter Twister profiles and LED colors via MID
 - One-click everything bundle export/import (full profile + named presets).
 - RGB picker maps full RGB color space to the nearest Twister 7-bit palette color index (0..127).
 
+## Planning + Handoff
+
+- 25-feature implementation plan and live progress tracker:
+- `IMPLEMENTATION_ROADMAP_25.md`
+
+## Agent Template JSON
+
+- Sample file for agent-generated custom profiles:
+- `examples/custom_profile_template.json`
+- To use it, duplicate encoder rows until there are exactly 64 entries, then load it with `Load JSON`.
+
 ## Requirements
 
 - Python 3.10+
