@@ -47,7 +47,7 @@ Any agent continuing work should start here and update status/logs before and af
 22. Guided Recovery Mode - planned
 23. Portable Show Pack Export - in-progress
 24. Session Sandbox - planned
-25. Diagnostics Report Generator - planned
+25. Diagnostics Report Generator - done
 
 ## Delivery Phases
 
@@ -222,5 +222,6 @@ After coding:
 - Implemented Feature 5: preflight drift detection re-pulls targets and warns before overwrite.
 - Implemented Feature 6: smart send validation with blocking errors and confirmable warnings.
 - Implemented Feature 4: live MIDI monitor window with SysEx TX/RX stream summary.
-- Next immediate implementation target: Phase 2 feature 25.
+- Implemented Feature 25: diagnostics report export including MIDI state and recent monitor logs.
+- Next immediate implementation target: Phase 2 feature 7.
 - Validation pending for firmware build in this session.
