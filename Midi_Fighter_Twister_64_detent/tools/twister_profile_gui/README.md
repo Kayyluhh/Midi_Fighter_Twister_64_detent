@@ -1,4 +1,4 @@
-# Midi Fighter Twister Profile + RGB GUI
+# Midi Fighter Twistluhh Utility
 
 Desktop app for configuring Midi Fighter Twister profiles and LED colors via MIDI SysEx.
 
@@ -10,6 +10,7 @@ Desktop app for configuring Midi Fighter Twister profiles and LED colors via MID
 - Pull and push per-encoder settings for a whole bank (16 encoders) via bulk transfer command 0x04.
 - Pull and push all banks (all 64 encoders) in one action.
 - Live MIDI monitor for outgoing and incoming SysEx activity.
+- Built-in GitHub patcher with manifest check, checksum validation, and backup before apply.
 - Diagnostics report export for support and troubleshooting.
 - Performance mode with configurable transfer delay and retry for bulk operations.
 - Firmware compatibility check based on the profile's target firmware.
@@ -98,6 +99,7 @@ python3 app.py
 
 1. Select Twister input/output ports and click Connect.
 2. On first launch, run Setup Wizard to verify ports, run a SysEx probe, and optionally pull full device state.
+3. Open `GitHub Patcher` to check/apply verified patch bundles from your manifest URL.
 3. Click Pull Global and Pull Bank (or Pull All Banks) to import current device settings.
 3. Choose an apply scope (`All Fields`, `Colors Only`, `MIDI Only`, `Behavior Only`).
 4. In Graphical Bank View, select one or more knobs (click, drag, Shift, Cmd).
@@ -203,7 +205,7 @@ Build a one-click `.app` bundle using:
 
 Result:
 
-- `dist/MFT Profile GUI.app`
+- `dist/Midi Fighter Twistluhh Utility.app`
 
 ## Notes
 

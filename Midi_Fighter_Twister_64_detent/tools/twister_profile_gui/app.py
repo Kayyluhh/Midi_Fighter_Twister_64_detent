@@ -1,8 +1,13 @@
 import json
 import hashlib
+import io
 import queue
 import random
+import shutil
 import time
+import urllib.error
+import urllib.request
+import zipfile
 from datetime import datetime
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -115,6 +120,12 @@ FIRMWARE_CAPABILITIES: dict[str, dict[str, object]] = {
 }
 
 APP_SETTINGS_VERSION = 1
+APP_NAME = "Midi Fighter Twistluhh Utility"
+APP_VERSION = "2026.03.16"
+DEFAULT_PATCH_MANIFEST_URL = (
+    "https://raw.githubusercontent.com/Kayyluhh/Midi_Fighter_Twister_64_detent/main/"
+    "Midi_Fighter_Twister_64_detent/tools/twister_profile_gui/patch_manifest.json"
+)
 
 
 def clamp7(value: int) -> int:
@@ -452,7 +463,7 @@ def nearest_palette_index(rgb: tuple[int, int, int], palette: list[tuple[int, in
 class TwisterGui(Tk):
     def __init__(self):
         super().__init__()
-        self.title("Midi Fighter Twister Profile + RGB GUI")
+        self.title(APP_NAME)
         self.geometry("1350x840")
         self.minsize(1180, 760)
 
@@ -508,15 +519,18 @@ class TwisterGui(Tk):
         self.settings_file = Path(__file__).with_name("app_settings.json")
         self.preset_file = Path(__file__).with_name("presets.json")
         self.backup_dir = Path(__file__).with_name("backups")
+        self.patch_dir = Path(__file__).with_name("patches")
         self.template_dir = Path(__file__).with_name("templates")
         self.host_preset_dir = Path(__file__).with_name("host_presets")
         self.backup_dir.mkdir(parents=True, exist_ok=True)
+        self.patch_dir.mkdir(parents=True, exist_ok=True)
         self.named_presets: dict[str, dict] = self._load_named_presets()
         self.preset_name_var = StringVar(value="")
         self.preset_select_var = StringVar(value="")
         self.template_var = StringVar(value="")
         self.host_bridge_var = StringVar(value="")
         self.metadata_summary_var = StringVar(value="")
+        self.patch_manifest_url_var = StringVar(value=DEFAULT_PATCH_MANIFEST_URL)
         self.template_library = self._load_template_library()
         self.host_bridge_presets = self._load_host_bridge_presets()
         self.template_combo = None
@@ -638,6 +652,7 @@ class TwisterGui(Tk):
             "Merge Profile": "Merge another profile into current edits.",
             "Restore Last Snapshot": "Restore latest auto-backup snapshot.",
             "Export Diagnostics": "Export troubleshooting report with app state.",
+            "GitHub Patcher": "Check GitHub patch manifest and apply verified patch bundles.",
             "Import Show Pack": "Import profile + presets show pack bundle.",
             "Export Show Pack": "Export profile + presets show pack bundle.",
             "Import Bank Snippet": "Import one-bank encoder snippet JSON.",
@@ -694,6 +709,9 @@ class TwisterGui(Tk):
             "Apply Theme To All 64": "Apply chosen theme pack to all encoders.",
             "Rule To Selected": "Apply auto-color rule to selection.",
             "Rule To All 64": "Apply auto-color rule to all encoders.",
+            "Check Manifest": "Fetch patch metadata JSON from GitHub.",
+            "Apply Patch": "Download patch archive, verify checksum, and apply with backups.",
+            "Close": "Close this window.",
             "Clear": "Clear MIDI monitor log output history.",
         }
 
@@ -729,6 +747,7 @@ class TwisterGui(Tk):
         self._var_tooltip_map[self.clipboard_slot_var._name] = "Clipboard slot number (1..4)."
         self._var_tooltip_map[self.theme_pack_var._name] = "Selected color theme pack for apply actions."
         self._var_tooltip_map[self.auto_color_rule_var._name] = "Rule used for automatic color assignment."
+        self._var_tooltip_map[self.patch_manifest_url_var._name] = "GitHub raw URL for patch manifest JSON."
         self._var_tooltip_map[self.preset_name_var._name] = "Name used when saving a new preset."
         self._var_tooltip_map[self.preset_select_var._name] = "Select existing preset to apply or delete."
         self._var_tooltip_map[self.template_var._name] = "Select template to stamp bank/profile values."
@@ -992,6 +1011,7 @@ class TwisterGui(Tk):
         ttk.Button(toolbar, text="Merge Profile", command=self.merge_profile_file).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Restore Last Snapshot", command=self.restore_last_snapshot).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Export Diagnostics", command=self.export_diagnostics_report).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="GitHub Patcher", command=self.open_github_patcher).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Import Show Pack", command=self.import_everything_bundle).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Export Show Pack", command=self.export_everything_bundle).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Import Bank Snippet", command=self.import_bank_snippet).pack(side=LEFT, padx=4)
@@ -2068,6 +2088,7 @@ class TwisterGui(Tk):
             theme_pack = raw.get("theme_pack")
             auto_color_rule = raw.get("auto_color_rule")
             clipboard_slot = raw.get("clipboard_slot")
+            patch_manifest_url = raw.get("patch_manifest_url")
 
             if isinstance(input_port, str):
                 self.input_port_var.set(input_port)
@@ -2081,6 +2102,8 @@ class TwisterGui(Tk):
                 self.auto_color_rule_var.set(auto_color_rule)
             if isinstance(clipboard_slot, int):
                 self.clipboard_slot_var.set(max(1, min(4, clipboard_slot)))
+            if isinstance(patch_manifest_url, str) and patch_manifest_url.strip():
+                self.patch_manifest_url_var.set(patch_manifest_url.strip())
 
             self.dry_run_var.set(bool(raw.get("dry_run", self.dry_run_var.get())))
             self.confirm_threshold_var.set(max(1, int(raw.get("confirm_threshold", self.confirm_threshold_var.get()))))
@@ -2114,6 +2137,7 @@ class TwisterGui(Tk):
             "theme_pack": self.theme_pack_var.get(),
             "auto_color_rule": self.auto_color_rule_var.get(),
             "clipboard_slot": int(self.clipboard_slot_var.get()),
+            "patch_manifest_url": self.patch_manifest_url_var.get(),
             "midi_log_enabled": bool(self.midi_log_enabled.get()),
             "wizard_completed": bool(self.wizard_completed),
             "favorite_fields": {key: bool(self.favorite_fields_var[key].get()) for key in ENCODER_TAGS},
@@ -3671,7 +3695,8 @@ class TwisterGui(Tk):
             "version": 1,
             "created_at": datetime.now().isoformat(timespec="seconds"),
             "app": {
-                "title": "Midi Fighter Twister Profile + RGB GUI",
+                "title": APP_NAME,
+                "version": APP_VERSION,
                 "connected": bool(self.client.connected),
                 "selected_bank": int(self.bank_var.get()),
                 "selected_encoder": int(self.encoder_var.get()),
@@ -3694,6 +3719,185 @@ class TwisterGui(Tk):
             "globals": self.profile.globals,
             "recent_midi_log": self.midi_log_lines[-200:],
         }
+
+    def _fetch_patch_manifest(self, url: str) -> dict:
+        try:
+            with urllib.request.urlopen(url, timeout=20) as response:
+                raw = response.read().decode("utf-8")
+            manifest = json.loads(raw)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Failed to fetch manifest: {exc}") from exc
+
+        if not isinstance(manifest, dict):
+            raise RuntimeError("Manifest must be a JSON object.")
+        download_url = str(manifest.get("download_url") or "").strip()
+        if not download_url:
+            raise RuntimeError("Manifest is missing required field: download_url")
+        return manifest
+
+    def _download_patch_archive(self, url: str) -> bytes:
+        try:
+            with urllib.request.urlopen(url, timeout=45) as response:
+                return response.read()
+        except (urllib.error.URLError, TimeoutError) as exc:
+            raise RuntimeError(f"Failed to download patch archive: {exc}") from exc
+
+    def _apply_patch_archive(self, payload: bytes, manifest: dict, manifest_url: str) -> tuple[list[str], str]:
+        expected_sha = str(manifest.get("sha256") or "").strip().lower()
+        actual_sha = hashlib.sha256(payload).hexdigest()
+        if expected_sha and expected_sha != actual_sha:
+            raise RuntimeError(f"Patch checksum mismatch. expected={expected_sha} actual={actual_sha}")
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_dir = Path(__file__).resolve().parent
+        backup_root = self.patch_dir / f"backup_{stamp}"
+        backup_root.mkdir(parents=True, exist_ok=True)
+        archive_path = self.patch_dir / f"patch_{stamp}.zip"
+        archive_path.write_bytes(payload)
+
+        applied: list[str] = []
+        with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+
+                member = info.filename.replace("\\", "/")
+                parts = [part for part in member.split("/") if part and part != "."]
+                if not parts or any(part == ".." for part in parts):
+                    raise RuntimeError(f"Unsafe patch path: {info.filename}")
+
+                rel_path = Path(*parts)
+                target = (base_dir / rel_path).resolve()
+                if not target.is_relative_to(base_dir):
+                    raise RuntimeError(f"Patch target escapes app directory: {info.filename}")
+
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.exists():
+                    backup_target = backup_root / rel_path
+                    backup_target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(target, backup_target)
+
+                target.write_bytes(zf.read(info))
+                applied.append(str(rel_path))
+
+        history_path = self.patch_dir / "patch_history.jsonl"
+        history_record = {
+            "applied_at": datetime.now().isoformat(timespec="seconds"),
+            "app_name": APP_NAME,
+            "app_version": APP_VERSION,
+            "manifest_url": manifest_url,
+            "download_url": str(manifest.get("download_url") or ""),
+            "version": str(manifest.get("version") or ""),
+            "sha256": actual_sha,
+            "files": applied,
+            "backup_dir": str(backup_root),
+            "archive_path": str(archive_path),
+        }
+        with history_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(history_record) + "\n")
+
+        return applied, str(backup_root)
+
+    def open_github_patcher(self) -> None:
+        win = Toplevel(self)
+        win.title("GitHub Patcher")
+        win.geometry("860x440")
+
+        bar = ttk.Frame(win)
+        bar.pack(fill=X, padx=10, pady=(10, 6))
+        ttk.Label(bar, text="Manifest URL").pack(side=LEFT)
+        manifest_entry = ttk.Entry(bar, textvariable=self.patch_manifest_url_var, width=98)
+        manifest_entry.pack(side=LEFT, padx=8, fill=X, expand=True)
+
+        out = Text(win, wrap="word", height=18)
+        out.pack(fill=BOTH, expand=True, padx=10, pady=(0, 8))
+
+        footer = ttk.Frame(win)
+        footer.pack(fill=X, padx=10, pady=(0, 10))
+
+        state: dict[str, dict | None] = {"manifest": None}
+
+        def render(lines: list[str]) -> None:
+            out.configure(state="normal")
+            out.delete("1.0", "end")
+            out.insert("1.0", "\n".join(lines) + "\n")
+            out.configure(state="disabled")
+
+        def check_manifest() -> None:
+            url = self.patch_manifest_url_var.get().strip()
+            if not url:
+                messagebox.showwarning("GitHub Patcher", "Enter a manifest URL first.")
+                return
+            try:
+                manifest = self._fetch_patch_manifest(url)
+            except Exception as exc:
+                messagebox.showerror("GitHub Patcher", str(exc))
+                return
+
+            state["manifest"] = manifest
+            self._save_app_settings()
+            lines = [
+                "Manifest Loaded",
+                "",
+                f"URL: {url}",
+                f"Version: {manifest.get('version', 'n/a')}",
+                f"Download: {manifest.get('download_url', 'n/a')}",
+                f"SHA256: {manifest.get('sha256', 'not provided')}",
+                "",
+                "Notes:",
+                str(manifest.get("notes", "(no notes)")),
+            ]
+            render(lines)
+
+        def apply_patch() -> None:
+            manifest = state["manifest"]
+            if manifest is None:
+                check_manifest()
+                manifest = state["manifest"]
+            if manifest is None:
+                return
+            if self.sandbox_active:
+                messagebox.showwarning("GitHub Patcher", "Commit or discard sandbox edits before patching files.")
+                return
+            if not messagebox.askyesno(
+                "Apply Patch",
+                "Download and apply this patch now? Existing files will be backed up before changes are written.",
+            ):
+                return
+
+            try:
+                payload = self._download_patch_archive(str(manifest.get("download_url")))
+                applied, backup_dir = self._apply_patch_archive(payload, manifest, self.patch_manifest_url_var.get().strip())
+            except Exception as exc:
+                messagebox.showerror("GitHub Patcher", str(exc))
+                return
+
+            lines = [
+                "Patch Applied",
+                "",
+                f"Version: {manifest.get('version', 'n/a')}",
+                f"Files updated: {len(applied)}",
+                f"Backup dir: {backup_dir}",
+                "",
+            ]
+            lines.extend([f"- {item}" for item in applied[:120]])
+            render(lines)
+            self.status_var.set(f"Patch applied: {manifest.get('version', 'n/a')}")
+            messagebox.showinfo("GitHub Patcher", "Patch applied successfully. Restart the app to load all updates.")
+
+        ttk.Button(footer, text="Check Manifest", command=check_manifest).pack(side=LEFT)
+        ttk.Button(footer, text="Apply Patch", command=apply_patch).pack(side=LEFT, padx=8)
+        ttk.Button(footer, text="Close", command=win.destroy).pack(side=LEFT)
+
+        render([
+            "GitHub Patcher",
+            "",
+            "1) Enter a raw GitHub manifest URL.",
+            "2) Click Check Manifest.",
+            "3) Click Apply Patch to download, verify, backup, and patch local files.",
+        ])
+
+        self._attach_tooltips_recursive(win)
 
     def export_diagnostics_report(self) -> None:
         default_name = f"twister_diagnostics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"

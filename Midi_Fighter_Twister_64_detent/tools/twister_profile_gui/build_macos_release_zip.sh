@@ -4,8 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-APP_PATH="dist/MFT Profile GUI.app"
-ZIP_PATH="dist/MFT_Profile_GUI_macOS.zip"
+APP_NAME="Midi Fighter Twistluhh Utility"
+APP_PATH="dist/${APP_NAME}.app"
+ZIP_PATH="dist/Midi_Fighter_Twistluhh_Utility_macOS.zip"
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "App bundle not found at $APP_PATH. Building first..."
