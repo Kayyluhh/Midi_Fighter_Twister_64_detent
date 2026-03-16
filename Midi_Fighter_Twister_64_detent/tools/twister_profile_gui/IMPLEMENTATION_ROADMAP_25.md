@@ -24,8 +24,8 @@ Any agent continuing work should start here and update status/logs before and af
 ## Feature Matrix
 
 1. Setup Wizard - planned
-2. Device Snapshot + Auto-Backup - planned
-3. One-Click Restore Point - planned
+2. Device Snapshot + Auto-Backup - done
+3. One-Click Restore Point - done
 4. Live MIDI Activity Monitor - planned
 5. Conflict or Drift Warning - planned
 6. Smart Validation Rules - planned
@@ -217,5 +217,7 @@ After coding:
 - Updated firmware default indicator map to BLENDED_BAR for all physical encoders in src/encoders.c.
 - Added sample custom profile template JSON at tools/twister_profile_gui/examples/custom_profile_template.json.
 - Updated README with pointers to roadmap and template files.
+- Implemented Feature 2: automatic pre-send snapshots written to tools/twister_profile_gui/backups/.
+- Implemented Feature 3: one-click restore from latest snapshot with optional immediate push.
 - Next immediate implementation target: Phase 1 features 2, 3, 5, 6.
 - Validation pending for firmware build in this session.
