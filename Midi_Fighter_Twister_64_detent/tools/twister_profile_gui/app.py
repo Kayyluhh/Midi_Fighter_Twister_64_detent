@@ -490,6 +490,7 @@ class TwisterGui(Tk):
 
         ttk.Button(toolbar, text="Load JSON", command=self.load_json).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Save JSON", command=self.save_json).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Compare Profile", command=self.compare_profile_file).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Restore Last Snapshot", command=self.restore_last_snapshot).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Export Diagnostics", command=self.export_diagnostics_report).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Import Bundle", command=self.import_everything_bundle).pack(side=LEFT, padx=4)
@@ -1933,6 +1934,79 @@ class TwisterGui(Tk):
             lines.append("Details by Encoder")
             lines.extend(encoder_blocks)
         return lines
+
+    def _compute_profile_compare_lines(self, other: Profile, other_label: str) -> list[str]:
+        lines: list[str] = []
+
+        global_changes = []
+        for key in GLOBAL_TAGS:
+            cur = clamp7(self.profile.globals.get(key, 0))
+            alt = clamp7(other.globals.get(key, 0))
+            if cur != alt:
+                global_changes.append(f"global.{key}: current={cur}   {other_label}={alt}")
+
+        field_counts: dict[str, int] = {}
+        encoder_details: list[str] = []
+        for idx in range(TOTAL_ENCODERS):
+            cur = self.profile.encoders[idx]
+            alt = other.encoders[idx]
+            changes = []
+            for field_name in ENCODER_TAGS:
+                a = getattr(cur, field_name)
+                b = getattr(alt, field_name)
+                if a != b:
+                    changes.append(f"{field_name}: current={a}   {other_label}={b}")
+                    field_counts[field_name] = field_counts.get(field_name, 0) + 1
+            if changes:
+                bank = idx // ENCODERS_PER_BANK + 1
+                enc = idx % ENCODERS_PER_BANK + 1
+                encoder_details.append(f"B{bank}E{enc} (# {idx + 1})")
+                encoder_details.extend([f"  {item}" for item in changes])
+
+        lines.append("Compare Summary")
+        lines.append(f"Globals changed: {len(global_changes)}")
+        lines.append(f"Encoders changed: {sum(1 for idx in range(TOTAL_ENCODERS) if any(getattr(self.profile.encoders[idx], f) != getattr(other.encoders[idx], f) for f in ENCODER_TAGS))}")
+        lines.append("")
+
+        if field_counts:
+            lines.append("Field Change Counts")
+            for field_name, count in sorted(field_counts.items(), key=lambda item: (-item[1], item[0])):
+                lines.append(f"  {field_name}: {count} encoder(s)")
+            lines.append("")
+
+        if global_changes:
+            lines.append("Global Differences")
+            lines.extend([f"  {line}" for line in global_changes])
+            lines.append("")
+
+        if encoder_details:
+            lines.append("Encoder Differences")
+            lines.extend(encoder_details)
+
+        if len(lines) <= 4:
+            lines.append("No differences found.")
+        return lines
+
+    def compare_profile_file(self) -> None:
+        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json"), ("All Files", "*")])
+        if not path:
+            return
+        try:
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            if raw.get("mode") == "everything-bundle":
+                other = Profile.from_json_dict(raw.get("profile", {}))
+            else:
+                other = Profile.from_json_dict(raw)
+
+            lines = self._compute_profile_compare_lines(other, Path(path).name)
+            win = Toplevel(self)
+            win.title("Profile Compare")
+            txt = Text(win, wrap="word", width=100, height=32)
+            txt.pack(fill=BOTH, expand=True, padx=8, pady=8)
+            txt.insert("1.0", "\n".join(lines))
+            txt.configure(state="disabled")
+        except Exception as exc:
+            messagebox.showerror("Compare Error", str(exc))
 
     def _compute_heatmap_scores(self, targets: list[int]) -> dict[int, int]:
         scores: dict[int, int] = {}
