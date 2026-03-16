@@ -31,7 +31,7 @@ Any agent continuing work should start here and update status/logs before and af
 6. Smart Validation Rules - done
 7. Performance Mode (smart batching/throttling) - done
 8. Push Preview Heatmap - done
-9. Favorites and Lock Fields - planned
+9. Favorites and Lock Fields - done
 10. Color Theme Packs - planned
 11. Per-Bank Color Gradients - done
 12. Rules-Based Auto-Coloring - planned
@@ -225,5 +225,6 @@ After coding:
 - Implemented Feature 25: diagnostics report export including MIDI state and recent monitor logs.
 - Implemented Feature 7: performance mode with configurable transfer delay and retry for bulk operations.
 - Implemented Feature 8: push preview heatmap overlay for selected/all encoder targets.
-- Next immediate implementation target: Phase 3 feature 9.
+- Implemented Feature 9: per-field favorites and lock controls with favorites-only apply action.
+- Next immediate implementation target: Phase 3 feature 10.
 - Validation pending for firmware build in this session.
