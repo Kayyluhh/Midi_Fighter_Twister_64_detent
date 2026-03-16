@@ -374,6 +374,7 @@ class TwisterGui(Tk):
         self.performance_delay_ms_var = IntVar(value=6)
         self.performance_retry_var = IntVar(value=1)
         self.theme_pack_var = StringVar(value="Classic Neon")
+        self.auto_color_rule_var = StringVar(value="By MIDI Channel")
 
         self.context_var = StringVar(value="")
         self.selection_var = StringVar(value="")
@@ -651,6 +652,17 @@ class TwisterGui(Tk):
         ).pack(pady=2)
         ttk.Button(color_box, text="Apply Theme To Selected", command=self.apply_theme_to_selected).pack(pady=2)
         ttk.Button(color_box, text="Apply Theme To All 64", command=self.apply_theme_to_all).pack(pady=(2, 6))
+        ttk.Separator(color_box, orient="horizontal").pack(fill=X, pady=(6, 4))
+        ttk.Label(color_box, text="Auto-Color Rule").pack(pady=(2, 2))
+        ttk.Combobox(
+            color_box,
+            textvariable=self.auto_color_rule_var,
+            values=["By MIDI Channel", "By MIDI Type", "By CC Range"],
+            width=18,
+            state="readonly",
+        ).pack(pady=2)
+        ttk.Button(color_box, text="Rule To Selected", command=self.apply_auto_color_rule_selected).pack(pady=2)
+        ttk.Button(color_box, text="Rule To All 64", command=self.apply_auto_color_rule_all).pack(pady=(2, 6))
 
         global_frame = ttk.LabelFrame(right, text="Global Settings + Mini Map")
         global_frame.pack(fill=BOTH, expand=True)
@@ -1409,6 +1421,53 @@ class TwisterGui(Tk):
         self._load_encoder_fields_from_model()
         self._draw_knob_grid()
         self._draw_mini_map()
+
+    def _auto_color_values_for_encoder(self, idx: int) -> tuple[int, int, int]:
+        enc = self.profile.encoders[idx]
+        rule = self.auto_color_rule_var.get()
+
+        if rule == "By MIDI Type":
+            midi_type = enc.encoder_midi_type % 6
+            active_map = [25, 81, 100, 9, 52, 115]
+            inactive_map = [0, 40, 20, 2, 10, 30]
+            detent_map = [63, 52, 63, 15, 63, 63]
+            return active_map[midi_type], inactive_map[midi_type], detent_map[midi_type]
+
+        if rule == "By CC Range":
+            cc = enc.encoder_midi_number
+            if cc < 32:
+                return 25, 0, 63
+            if cc < 64:
+                return 81, 20, 63
+            if cc < 96:
+                return 100, 30, 63
+            return 9, 2, 15
+
+        ch = enc.encoder_midi_channel % 16
+        active = (ch * 8 + 9) % 128
+        inactive = (ch * 4) % 128
+        detent = 63 if enc.has_detent else inactive
+        return active, inactive, detent
+
+    def _apply_auto_color_rule_to_targets(self, targets: list[int]) -> None:
+        if not targets:
+            return
+        self._push_history()
+        for idx in targets:
+            a, i, d = self._auto_color_values_for_encoder(idx)
+            enc = self.profile.encoders[idx]
+            enc.active_color = clamp7(a)
+            enc.inactive_color = clamp7(i)
+            enc.detent_color = clamp7(d)
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def apply_auto_color_rule_selected(self) -> None:
+        self._apply_auto_color_rule_to_targets(sorted(self.selected_encoders))
+
+    def apply_auto_color_rule_all(self) -> None:
+        self._apply_auto_color_rule_to_targets(list(range(TOTAL_ENCODERS)))
 
     def pull_global(self) -> None:
         try:
