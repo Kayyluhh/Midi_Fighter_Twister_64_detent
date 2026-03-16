@@ -1,0 +1,14 @@
+{
+  "name": "Ableton Live",
+  "scope": "selected-bank",
+  "notes": [
+    "Use one bank per device rack or mixer page.",
+    "Map encoder turns to CC and switches to momentary toggles or clip functions.",
+    "Keep encoder MIDI channels grouped per bank to simplify Live remote scripts."
+  ],
+  "setup_steps": [
+    "Create a MIDI mapping layer in Live and enable Remote for the Twister input port.",
+    "Load the exported JSON as a reference while assigning CC numbers in MIDI Map Mode.",
+    "Reserve one bank for transport or device macros to keep navigation consistent."
+  ]
+}

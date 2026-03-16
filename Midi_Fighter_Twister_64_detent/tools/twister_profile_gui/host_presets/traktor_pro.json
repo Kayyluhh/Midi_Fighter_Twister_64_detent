@@ -1,0 +1,14 @@
+{
+  "name": "Traktor Pro",
+  "scope": "all-banks",
+  "notes": [
+    "Traktor benefits from dedicated banks for decks, FX units, and browser navigation.",
+    "Use bright color grouping per deck to reduce mistakes in dark booths.",
+    "Relative encoders are preferred for FX depth and browse interactions."
+  ],
+  "setup_steps": [
+    "Create or update a Controller Manager mapping in Traktor.",
+    "Use the exported all-bank summary to bind each encoder and switch to deck or FX targets.",
+    "Store the exported bridge JSON with the Traktor TSI so the hardware and software mapping stay paired."
+  ]
+}

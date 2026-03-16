@@ -19,8 +19,12 @@ Desktop app for configuring Midi Fighter Twister profiles and LED colors via MID
 - Relative/absolute conversion assistant for selected encoders.
 - Profile compare tool for full-profile and bundle JSON files.
 - Profile merge tool with scope and conflict resolution policy.
+- Profile metadata editor with notes, tags, firmware, template source, and host bridge fields.
+- Built-in bank template library plus custom template import support.
+- Host bridge preset export with mapping summaries and setup notes for common DAWs.
 - Automatic pre-send snapshots for push actions (saved under `backups/`).
 - One-click restore of the latest snapshot, with optional immediate push to device.
+- Portable show pack export/import with checksum verification.
 - Graphical 4x4 Twister-style bank view with per-knob color preview.
 - Active knob selection pulse animation for clearer focus while editing.
 - Bank tabs and a 64-encoder mini map for quick navigation.
@@ -49,6 +53,20 @@ Desktop app for configuring Midi Fighter Twister profiles and LED colors via MID
 - Sample file for agent-generated custom profiles:
 - `examples/custom_profile_template.json`
 - To use it, duplicate encoder rows until there are exactly 64 entries, then load it with `Load JSON`.
+
+## Built-In Templates
+
+- `templates/blank_performance_bank.json`
+- `templates/detented_mixer_bank.json`
+- `templates/fx_relative_bank.json`
+- Apply these from the in-app `Template` picker to stamp the current bank quickly.
+
+## Host Bridge Presets
+
+- `host_presets/ableton_live.json`
+- `host_presets/bitwig_studio.json`
+- `host_presets/traktor_pro.json`
+- Use the in-app `Export Host Bridge` action to write a host-specific reference JSON with setup notes and a mapping summary.
 
 ## Requirements
 
@@ -89,15 +107,21 @@ python3 app.py
 15. Use `Convert Rel/Abs` to switch selected encoders between absolute and relative mode.
 16. Use `Compare Profile` to inspect differences against another profile file.
 17. Use `Merge Profile` to combine incoming profile data with current edits.
-18. Use `Export Diagnostics` to save app/MIDI/safety state and recent logs.
-19. Save full JSON or export a bank snippet JSON.
+18. Use `Profile Metadata` to store notes, tags, firmware target, and sharing context inside the profile.
+19. Apply a built-in `Template` or import a custom template JSON.
+20. Use `Export Host Bridge` to generate host-specific setup notes and encoder mapping summaries.
+21. Use `Export Show Pack` to bundle profile + presets + metadata with integrity checks.
+22. Use `Export Diagnostics` to save app/MIDI/safety state and recent logs.
+23. Save full JSON or export a bank snippet JSON.
 
-## Everything Bundle
+## Portable Show Pack
 
-- `Export Everything`: writes one JSON containing:
+- `Export Show Pack`: writes one JSON containing:
 - Full profile (`globals` + 64 encoders)
+- Profile metadata
 - All named presets
-- `Import Bundle`: restores profile + named presets from that bundle.
+- Integrity checksums for the profile, metadata, and preset payloads
+- `Import Show Pack`: restores profile + metadata + named presets from that bundle and warns if checksums do not match.
 
 ## Preset Sharing
 
@@ -108,6 +132,7 @@ python3 app.py
 
 - Full profile JSON: contains global settings and all 64 encoders.
 - Bank snippet JSON: contains a single bank's 16 encoders and a `mode: bank-snippet` marker.
+- Portable show pack JSON: contains full profile data, metadata, presets, and verification checksums.
 
 ## Safety Features
 

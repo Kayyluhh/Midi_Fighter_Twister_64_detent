@@ -39,13 +39,13 @@ Any agent continuing work should start here and update status/logs before and af
 14. Relative or Absolute Conversion Assistant - done
 15. Profile Compare Tool - done
 16. Merge Profiles - done
-17. Profile Notes and Tags - planned
-18. Templates Library - planned
-19. Plugin Host Bridge Presets - planned
+17. Profile Notes and Tags - done
+18. Templates Library - done
+19. Plugin Host Bridge Presets - done
 20. Keyboard-First Editing Mode - in-progress
 21. In-App Firmware Compatibility Check - planned
 22. Guided Recovery Mode - planned
-23. Portable Show Pack Export - in-progress
+23. Portable Show Pack Export - done
 24. Session Sandbox - planned
 25. Diagnostics Report Generator - done
 
@@ -234,3 +234,13 @@ After coding:
 - Implemented Feature 16: merge tool with scope and conflict policy options.
 - Next immediate implementation target: Phase 4 feature 17.
 - Validation pending for firmware build in this session.
+
+### 2026-03-16 (Current Session)
+- Planned scope: complete Phase 4 sharing workflow features first.
+- Targeted features set to in-progress: 17 Profile Notes and Tags, 18 Templates Library, 19 Plugin Host Bridge Presets, 23 Portable Show Pack Export.
+- Implemented Feature 17: profile metadata editor with notes, tags, firmware, template source, and host bridge tracking in profile JSON.
+- Implemented Feature 18: built-in template library with import helper and bundled bank template JSON files.
+- Implemented Feature 19: plugin host bridge preset export for Ableton Live, Bitwig Studio, and Traktor Pro with mapping summaries and setup notes.
+- Implemented Feature 23: portable show pack export/import with metadata retention and checksum verification.
+- Changed files: tools/twister_profile_gui/app.py, tools/twister_profile_gui/README.md, tools/twister_profile_gui/templates/*.json, tools/twister_profile_gui/host_presets/*.json.
+- Validation: VS Code Problems check on tools/twister_profile_gui/app.py returned no errors.

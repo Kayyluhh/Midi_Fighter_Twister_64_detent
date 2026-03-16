@@ -1,4 +1,5 @@
 import json
+import hashlib
 import queue
 import random
 import time
@@ -98,6 +99,73 @@ def clamp7(value: int) -> int:
     return max(0, min(127, int(value)))
 
 
+def iso_now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def normalize_tags(raw: object) -> list[str]:
+    if isinstance(raw, str):
+        values = [part.strip() for part in raw.split(",")]
+    elif isinstance(raw, list):
+        values = [str(part).strip() for part in raw]
+    else:
+        values = []
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(value)
+    return deduped
+
+
+def checksum_json(data: object) -> str:
+    payload = json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def default_profile_metadata() -> "ProfileMetadata":
+    now = iso_now()
+    return ProfileMetadata(created_at=now, updated_at=now)
+
+
+@dataclass
+class ProfileMetadata:
+    name: str = "Twister Profile"
+    notes: str = ""
+    tags: list[str] = field(default_factory=list)
+    firmware: str = "open-source-default"
+    created_at: str = ""
+    updated_at: str = ""
+    template_source: str = ""
+    host_bridge: str = ""
+
+    def mark_updated(self) -> None:
+        now = iso_now()
+        if not self.created_at:
+            self.created_at = now
+        self.updated_at = now
+
+    @staticmethod
+    def from_json_dict(data: dict | None) -> "ProfileMetadata":
+        source = data if isinstance(data, dict) else {}
+        metadata = default_profile_metadata()
+        metadata.name = str(source.get("name") or metadata.name).strip() or metadata.name
+        metadata.notes = str(source.get("notes") or "")
+        metadata.tags = normalize_tags(source.get("tags", []))
+        metadata.firmware = str(source.get("firmware") or metadata.firmware).strip() or metadata.firmware
+        metadata.created_at = str(source.get("created_at") or metadata.created_at)
+        metadata.updated_at = str(source.get("updated_at") or metadata.updated_at)
+        metadata.template_source = str(source.get("template_source") or "").strip()
+        metadata.host_bridge = str(source.get("host_bridge") or "").strip()
+        return metadata
+
+
 @dataclass
 class EncoderConfig:
     has_detent: int = 0
@@ -131,6 +199,7 @@ class EncoderConfig:
 
 @dataclass
 class Profile:
+    metadata: ProfileMetadata = field(default_factory=default_profile_metadata)
     globals: dict[str, int] = field(default_factory=lambda: {
         "midi_channel": 4,
         "side_is_banked": 1,
@@ -152,6 +221,7 @@ class Profile:
 
     def to_json_dict(self) -> dict:
         return {
+            "metadata": asdict(self.metadata),
             "globals": self.globals,
             "encoders": [asdict(e) for e in self.encoders],
         }
@@ -159,6 +229,7 @@ class Profile:
     @staticmethod
     def from_json_dict(data: dict) -> "Profile":
         profile = Profile()
+        profile.metadata = ProfileMetadata.from_json_dict(data.get("metadata"))
         profile.globals.update({k: clamp7(v) for k, v in data.get("globals", {}).items() if k in GLOBAL_TAGS})
         encoders_data = data.get("encoders", [])
         for i, row in enumerate(encoders_data[:TOTAL_ENCODERS]):
@@ -407,10 +478,19 @@ class TwisterGui(Tk):
         self.clipboard_slots: dict[int, EncoderConfig | None] = {1: None, 2: None, 3: None, 4: None}
         self.preset_file = Path(__file__).with_name("presets.json")
         self.backup_dir = Path(__file__).with_name("backups")
+        self.template_dir = Path(__file__).with_name("templates")
+        self.host_preset_dir = Path(__file__).with_name("host_presets")
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.named_presets: dict[str, dict] = self._load_named_presets()
         self.preset_name_var = StringVar(value="")
         self.preset_select_var = StringVar(value="")
+        self.template_var = StringVar(value="")
+        self.host_bridge_var = StringVar(value="")
+        self.metadata_summary_var = StringVar(value="")
+        self.template_library = self._load_template_library()
+        self.host_bridge_presets = self._load_host_bridge_presets()
+        self.template_combo = None
+        self.host_bridge_combo = None
         self.bank_tabs = None
         self.mini_map = None
         self.selection_pulse_phase = 0
@@ -430,6 +510,8 @@ class TwisterGui(Tk):
         self._draw_knob_grid()
         self._draw_mini_map()
         self._update_context_labels()
+        self._refresh_library_state()
+        self._update_metadata_summary()
         self._animate_selection_pulse()
         self.after(40, self._poll_events)
 
@@ -490,12 +572,13 @@ class TwisterGui(Tk):
 
         ttk.Button(toolbar, text="Load JSON", command=self.load_json).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Save JSON", command=self.save_json).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Profile Metadata", command=self.open_profile_metadata_editor).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Compare Profile", command=self.compare_profile_file).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Merge Profile", command=self.merge_profile_file).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Restore Last Snapshot", command=self.restore_last_snapshot).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Export Diagnostics", command=self.export_diagnostics_report).pack(side=LEFT, padx=4)
-        ttk.Button(toolbar, text="Import Bundle", command=self.import_everything_bundle).pack(side=LEFT, padx=4)
-        ttk.Button(toolbar, text="Export Everything", command=self.export_everything_bundle).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Import Show Pack", command=self.import_everything_bundle).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Export Show Pack", command=self.export_everything_bundle).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Import Bank Snippet", command=self.import_bank_snippet).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Export Bank Snippet", command=self.export_bank_snippet).pack(side=LEFT, padx=4)
         ttk.Separator(toolbar, orient="vertical").pack(side=LEFT, fill=Y, padx=10)
@@ -576,6 +659,36 @@ class TwisterGui(Tk):
         ttk.Separator(presets, orient="vertical").pack(side=LEFT, fill=Y, padx=8)
         ttk.Button(presets, text="Import Presets", command=self.import_named_presets).pack(side=LEFT, padx=4)
         ttk.Button(presets, text="Export Presets", command=self.export_named_presets).pack(side=LEFT, padx=4)
+
+        sharing = ttk.Frame(profile_frame)
+        sharing.pack(fill=X, padx=8, pady=(0, 6))
+        ttk.Label(sharing, text="Template").pack(side=LEFT)
+        self.template_combo = ttk.Combobox(
+            sharing,
+            textvariable=self.template_var,
+            values=sorted(self.template_library.keys()),
+            width=24,
+            state="readonly",
+        )
+        self.template_combo.pack(side=LEFT, padx=4)
+        ttk.Button(sharing, text="Apply Template", command=self.apply_selected_template).pack(side=LEFT, padx=4)
+        ttk.Button(sharing, text="Import Template File", command=self.import_template_file).pack(side=LEFT, padx=4)
+        ttk.Button(sharing, text="Refresh Templates", command=self.refresh_template_library).pack(side=LEFT, padx=4)
+        ttk.Separator(sharing, orient="vertical").pack(side=LEFT, fill=Y, padx=8)
+        ttk.Label(sharing, text="Host Bridge").pack(side=LEFT)
+        self.host_bridge_combo = ttk.Combobox(
+            sharing,
+            textvariable=self.host_bridge_var,
+            values=sorted(self.host_bridge_presets.keys()),
+            width=18,
+            state="readonly",
+        )
+        self.host_bridge_combo.pack(side=LEFT, padx=4)
+        ttk.Button(sharing, text="Export Host Bridge", command=self.export_host_bridge_preset).pack(side=LEFT, padx=4)
+
+        metadata_line = ttk.Frame(profile_frame)
+        metadata_line.pack(fill=X, padx=8, pady=(0, 6))
+        ttk.Label(metadata_line, textvariable=self.metadata_summary_var).pack(side=LEFT)
 
         tabs_wrap = ttk.Frame(profile_frame)
         tabs_wrap.pack(fill=X, padx=8, pady=(0, 6))
@@ -971,6 +1084,176 @@ class TwisterGui(Tk):
         self._draw_knob_grid()
         self._draw_mini_map()
 
+    def _sanitize_named_presets(self, presets_data: object) -> dict[str, dict]:
+        clean_presets: dict[str, dict] = {}
+        if not isinstance(presets_data, dict):
+            return clean_presets
+        for name, payload in presets_data.items():
+            if not isinstance(name, str) or not isinstance(payload, dict):
+                continue
+            clean = {}
+            for field_name in ENCODER_TAGS:
+                if field_name in payload:
+                    clean[field_name] = clamp7(payload[field_name])
+            if clean:
+                clean_presets[name] = clean
+        return clean_presets
+
+    def _mark_profile_updated(self) -> None:
+        self.profile.metadata.mark_updated()
+        self._update_metadata_summary()
+
+    def _update_metadata_summary(self) -> None:
+        metadata = self.profile.metadata
+        tags = ", ".join(metadata.tags[:4]) if metadata.tags else "none"
+        source = metadata.template_source or "manual"
+        self.metadata_summary_var.set(
+            f"Profile: {metadata.name}   Firmware: {metadata.firmware}   Tags: {tags}   Template: {source}"
+        )
+
+    def _apply_profile_object(self, profile: Profile) -> None:
+        self.profile = Profile.from_json_dict(profile.to_json_dict())
+        for key in GLOBAL_TAGS:
+            self.global_fields[key].set(self.profile.globals.get(key, 0))
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+        self._update_metadata_summary()
+
+    def _load_template_library(self) -> dict[str, Path]:
+        library: dict[str, Path] = {}
+        if not self.template_dir.exists():
+            return library
+        for path in sorted(self.template_dir.glob("*.json")):
+            label = path.stem.replace("_", " ").title()
+            library[label] = path
+        return library
+
+    def _load_host_bridge_presets(self) -> dict[str, dict]:
+        library: dict[str, dict] = {}
+        if not self.host_preset_dir.exists():
+            return library
+        for path in sorted(self.host_preset_dir.glob("*.json")):
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(raw, dict):
+                continue
+            label = str(raw.get("name") or path.stem.replace("_", " ").title()).strip()
+            library[label] = raw
+        return library
+
+    def _refresh_library_state(self) -> None:
+        if self.template_combo is not None:
+            self.template_combo["values"] = sorted(self.template_library.keys())
+        if self.host_bridge_combo is not None:
+            self.host_bridge_combo["values"] = sorted(self.host_bridge_presets.keys())
+        if not self.template_var.get() and self.template_library:
+            self.template_var.set(next(iter(sorted(self.template_library.keys()))))
+        if not self.host_bridge_var.get() and self.host_bridge_presets:
+            self.host_bridge_var.set(next(iter(sorted(self.host_bridge_presets.keys()))))
+
+    def refresh_template_library(self) -> None:
+        self.template_library = self._load_template_library()
+        self.host_bridge_presets = self._load_host_bridge_presets()
+        self._refresh_library_state()
+
+    def open_profile_metadata_editor(self) -> None:
+        win = Toplevel(self)
+        win.title("Profile Metadata")
+        win.geometry("620x420")
+
+        metadata = self.profile.metadata
+        name_var = StringVar(value=metadata.name)
+        tags_var = StringVar(value=", ".join(metadata.tags))
+        firmware_var = StringVar(value=metadata.firmware)
+
+        form = ttk.Frame(win)
+        form.pack(fill=BOTH, expand=True, padx=10, pady=10)
+
+        ttk.Label(form, text="Name").grid(row=0, column=0, sticky="w", padx=4, pady=4)
+        ttk.Entry(form, textvariable=name_var, width=48).grid(row=0, column=1, sticky="ew", padx=4, pady=4)
+        ttk.Label(form, text="Tags").grid(row=1, column=0, sticky="w", padx=4, pady=4)
+        ttk.Entry(form, textvariable=tags_var, width=48).grid(row=1, column=1, sticky="ew", padx=4, pady=4)
+        ttk.Label(form, text="Firmware").grid(row=2, column=0, sticky="w", padx=4, pady=4)
+        ttk.Entry(form, textvariable=firmware_var, width=48).grid(row=2, column=1, sticky="ew", padx=4, pady=4)
+        ttk.Label(form, text="Notes").grid(row=3, column=0, sticky="nw", padx=4, pady=4)
+
+        notes_text = Text(form, wrap="word", width=56, height=14)
+        notes_text.grid(row=3, column=1, sticky="nsew", padx=4, pady=4)
+        notes_text.insert("1.0", metadata.notes)
+        form.columnconfigure(1, weight=1)
+        form.rowconfigure(3, weight=1)
+
+        footer = ttk.Frame(win)
+        footer.pack(fill=X, padx=10, pady=(0, 10))
+
+        def _save() -> None:
+            self._push_history()
+            self.profile.metadata.name = name_var.get().strip() or "Twister Profile"
+            self.profile.metadata.tags = normalize_tags(tags_var.get())
+            self.profile.metadata.firmware = firmware_var.get().strip() or "open-source-default"
+            self.profile.metadata.notes = notes_text.get("1.0", "end").strip()
+            self._mark_profile_updated()
+            win.destroy()
+
+        ttk.Button(footer, text="Save", command=_save).pack(side=LEFT)
+        ttk.Button(footer, text="Cancel", command=win.destroy).pack(side=LEFT, padx=8)
+
+    def _apply_template_payload(self, raw: dict, source_label: str) -> None:
+        mode = str(raw.get("mode") or "")
+        self._push_history()
+
+        if mode in {"portable-show-pack", "everything-bundle"}:
+            self._apply_profile_object(Profile.from_json_dict(raw.get("profile", {})))
+            presets = self._sanitize_named_presets(raw.get("named_presets", {}))
+            if presets:
+                self.named_presets.update(presets)
+                self._save_named_presets()
+        elif mode == "bank-snippet":
+            bank = max(1, min(NUM_BANKS, int(self.bank_var.get())))
+            start = (bank - 1) * ENCODERS_PER_BANK
+            for i, row in enumerate(raw.get("encoders", [])[:ENCODERS_PER_BANK]):
+                dst = self.profile.encoders[start + i]
+                for field_name in ENCODER_TAGS:
+                    if field_name in row:
+                        setattr(dst, field_name, clamp7(row[field_name]))
+            self._set_active_index(start)
+            self._load_encoder_fields_from_model()
+            self._draw_knob_grid()
+            self._draw_mini_map()
+        else:
+            self._apply_profile_object(Profile.from_json_dict(raw))
+
+        self.profile.metadata.template_source = source_label
+        template_tags = normalize_tags(self.profile.metadata.tags + ["template"])
+        self.profile.metadata.tags = template_tags
+        self._mark_profile_updated()
+        self.status_var.set(f"Applied template: {source_label}")
+
+    def apply_selected_template(self) -> None:
+        label = self.template_var.get().strip()
+        path = self.template_library.get(label)
+        if not label or path is None:
+            messagebox.showwarning("Template", "Select a template first.")
+            return
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            self._apply_template_payload(raw, label)
+        except Exception as exc:
+            messagebox.showerror("Template Error", str(exc))
+
+    def import_template_file(self) -> None:
+        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json"), ("All Files", "*")])
+        if not path:
+            return
+        try:
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            self._apply_template_payload(raw, Path(path).stem)
+        except Exception as exc:
+            messagebox.showerror("Template Error", str(exc))
+
     def _load_named_presets(self) -> dict:
         if not self.preset_file.exists():
             return {}
@@ -1038,21 +1321,14 @@ class TwisterGui(Tk):
             raw = json.loads(Path(path).read_text(encoding="utf-8"))
             if raw.get("mode") != "named-presets":
                 raise ValueError("File is not a named-presets export")
-            presets = raw.get("presets", {})
-            if not isinstance(presets, dict):
+            presets = self._sanitize_named_presets(raw.get("presets", {}))
+            if not presets:
                 raise ValueError("Invalid presets payload")
 
             merged = 0
             for name, payload in presets.items():
-                if not isinstance(name, str) or not isinstance(payload, dict):
-                    continue
-                clean: dict[str, int] = {}
-                for field_name in ENCODER_TAGS:
-                    if field_name in payload:
-                        clean[field_name] = clamp7(payload[field_name])
-                if clean:
-                    self.named_presets[name] = clean
-                    merged += 1
+                self.named_presets[name] = payload
+                merged += 1
 
             self._save_named_presets()
             messagebox.showinfo("Imported", f"Imported {merged} preset(s).")
@@ -1939,6 +2215,18 @@ class TwisterGui(Tk):
     def _compute_profile_compare_lines(self, other: Profile, other_label: str) -> list[str]:
         lines: list[str] = []
 
+        metadata_changes = []
+        metadata_fields = ["name", "firmware", "template_source", "host_bridge", "notes"]
+        for field_name in metadata_fields:
+            cur = getattr(self.profile.metadata, field_name)
+            alt = getattr(other.metadata, field_name)
+            if cur != alt:
+                metadata_changes.append(f"metadata.{field_name}: current={cur!r}   {other_label}={alt!r}")
+        if self.profile.metadata.tags != other.metadata.tags:
+            metadata_changes.append(
+                f"metadata.tags: current={self.profile.metadata.tags!r}   {other_label}={other.metadata.tags!r}"
+            )
+
         global_changes = []
         for key in GLOBAL_TAGS:
             cur = clamp7(self.profile.globals.get(key, 0))
@@ -1975,6 +2263,11 @@ class TwisterGui(Tk):
                 lines.append(f"  {field_name}: {count} encoder(s)")
             lines.append("")
 
+        if metadata_changes:
+            lines.append("Metadata Differences")
+            lines.extend([f"  {line}" for line in metadata_changes])
+            lines.append("")
+
         if global_changes:
             lines.append("Global Differences")
             lines.extend([f"  {line}" for line in global_changes])
@@ -1994,7 +2287,7 @@ class TwisterGui(Tk):
             return
         try:
             raw = json.loads(Path(path).read_text(encoding="utf-8"))
-            if raw.get("mode") == "everything-bundle":
+            if raw.get("mode") in {"everything-bundle", "portable-show-pack"}:
                 other = Profile.from_json_dict(raw.get("profile", {}))
             else:
                 other = Profile.from_json_dict(raw)
@@ -2014,6 +2307,20 @@ class TwisterGui(Tk):
         default_profile = Profile()
 
         if include_globals:
+            metadata_fields = ["name", "notes", "firmware", "template_source", "host_bridge"]
+            for field_name in metadata_fields:
+                cur = getattr(self.profile.metadata, field_name)
+                inc = getattr(incoming.metadata, field_name)
+                default_val = getattr(default_profile.metadata, field_name)
+                if cur == inc:
+                    continue
+                if incoming_wins or cur == default_val:
+                    setattr(self.profile.metadata, field_name, inc)
+                    changed += 1
+            if self.profile.metadata.tags != incoming.metadata.tags and (incoming_wins or not self.profile.metadata.tags):
+                self.profile.metadata.tags = list(incoming.metadata.tags)
+                changed += 1
+
             for key in GLOBAL_TAGS:
                 cur = clamp7(self.profile.globals.get(key, 0))
                 inc = clamp7(incoming.globals.get(key, cur))
@@ -2044,7 +2351,7 @@ class TwisterGui(Tk):
             return
         try:
             raw = json.loads(Path(path).read_text(encoding="utf-8"))
-            if raw.get("mode") == "everything-bundle":
+            if raw.get("mode") in {"everything-bundle", "portable-show-pack"}:
                 incoming = Profile.from_json_dict(raw.get("profile", {}))
             else:
                 incoming = Profile.from_json_dict(raw)
@@ -2082,9 +2389,102 @@ class TwisterGui(Tk):
             self._load_encoder_fields_from_model()
             self._draw_knob_grid()
             self._draw_mini_map()
+            self._update_metadata_summary()
             messagebox.showinfo("Merge Complete", f"Applied {changed} merged value change(s).")
         except Exception as exc:
             messagebox.showerror("Merge Error", str(exc))
+
+    def _portable_show_pack_payload(self) -> dict:
+        self._apply_encoder_fields_to_model()
+        self._sync_globals_from_ui()
+        self._mark_profile_updated()
+        profile_data = self.profile.to_json_dict()
+        presets_data = self.named_presets
+        metadata_data = asdict(self.profile.metadata)
+        return {
+            "mode": "portable-show-pack",
+            "legacy_mode": "everything-bundle",
+            "version": 2,
+            "exported_at": iso_now(),
+            "profile": profile_data,
+            "named_presets": presets_data,
+            "checksums": {
+                "profile": checksum_json(profile_data),
+                "named_presets": checksum_json(presets_data),
+                "metadata": checksum_json(metadata_data),
+            },
+        }
+
+    def _verify_portable_show_pack(self, raw: dict) -> list[str]:
+        checksums = raw.get("checksums") if isinstance(raw.get("checksums"), dict) else {}
+        if not checksums:
+            return []
+        mismatches: list[str] = []
+        if checksums.get("profile") and checksums["profile"] != checksum_json(raw.get("profile", {})):
+            mismatches.append("profile checksum mismatch")
+        if checksums.get("named_presets") and checksums["named_presets"] != checksum_json(raw.get("named_presets", {})):
+            mismatches.append("named_presets checksum mismatch")
+        metadata_data = raw.get("profile", {}).get("metadata", {}) if isinstance(raw.get("profile"), dict) else {}
+        if checksums.get("metadata") and checksums["metadata"] != checksum_json(metadata_data):
+            mismatches.append("metadata checksum mismatch")
+        return mismatches
+
+    def _host_bridge_mapping_summary(self, targets: list[int]) -> list[dict]:
+        summary: list[dict] = []
+        for idx in targets:
+            enc = self.profile.encoders[idx]
+            summary.append({
+                "encoder": self._encoder_label(idx),
+                "encoder_midi_channel": clamp7(enc.encoder_midi_channel),
+                "encoder_midi_number": clamp7(enc.encoder_midi_number),
+                "encoder_midi_type": clamp7(enc.encoder_midi_type),
+                "switch_midi_channel": clamp7(enc.switch_midi_channel),
+                "switch_midi_number": clamp7(enc.switch_midi_number),
+                "switch_midi_type": clamp7(enc.switch_midi_type),
+            })
+        return summary
+
+    def export_host_bridge_preset(self) -> None:
+        label = self.host_bridge_var.get().strip()
+        preset = self.host_bridge_presets.get(label)
+        if not label or not isinstance(preset, dict):
+            messagebox.showwarning("Host Bridge", "Select a host bridge preset first.")
+            return
+
+        scope = str(preset.get("scope") or "selected-bank")
+        if scope == "all-banks":
+            targets = list(range(TOTAL_ENCODERS))
+        else:
+            bank = max(1, min(NUM_BANKS, int(self.bank_var.get()))) - 1
+            targets = self._target_indices_for_bank(bank)
+
+        self._apply_encoder_fields_to_model()
+        self._sync_globals_from_ui()
+        self.profile.metadata.host_bridge = label
+        self._mark_profile_updated()
+
+        default_name = f"twister_{label.lower().replace(' ', '_')}_bridge.json"
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            initialfile=default_name,
+            filetypes=[("JSON", "*.json")],
+        )
+        if not path:
+            return
+
+        payload = {
+            "mode": "plugin-host-bridge-preset",
+            "version": 1,
+            "host": label,
+            "exported_at": iso_now(),
+            "scope": scope,
+            "notes": preset.get("notes", []),
+            "setup_steps": preset.get("setup_steps", []),
+            "profile_metadata": asdict(self.profile.metadata),
+            "mapping_summary": self._host_bridge_mapping_summary(targets),
+        }
+        Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        messagebox.showinfo("Host Bridge Exported", f"Host bridge preset written to:\n{path}")
 
     def _compute_heatmap_scores(self, targets: list[int]) -> dict[int, int]:
         scores: dict[int, int] = {}
@@ -2142,22 +2542,11 @@ class TwisterGui(Tk):
         try:
             raw = json.loads(Path(path).read_text(encoding="utf-8"))
             self._push_history()
-            if raw.get("mode") == "everything-bundle":
+            if raw.get("mode") in {"everything-bundle", "portable-show-pack"}:
                 profile_data = raw.get("profile", {})
-                presets_data = raw.get("named_presets", {})
                 self.profile = Profile.from_json_dict(profile_data)
-                if isinstance(presets_data, dict):
-                    clean_presets: dict[str, dict] = {}
-                    for name, payload in presets_data.items():
-                        if isinstance(name, str) and isinstance(payload, dict):
-                            clean = {}
-                            for field_name in ENCODER_TAGS:
-                                if field_name in payload:
-                                    clean[field_name] = clamp7(payload[field_name])
-                            if clean:
-                                clean_presets[name] = clean
-                    self.named_presets = clean_presets
-                    self._save_named_presets()
+                self.named_presets = self._sanitize_named_presets(raw.get("named_presets", {}))
+                self._save_named_presets()
             elif raw.get("mode") == "bank-snippet":
                 bank = max(1, min(4, int(raw.get("bank", int(self.bank_var.get())))))
                 start = (bank - 1) * ENCODERS_PER_BANK
@@ -2174,6 +2563,7 @@ class TwisterGui(Tk):
             self._load_encoder_fields_from_model()
             self._draw_knob_grid()
             self._draw_mini_map()
+            self._update_metadata_summary()
         except Exception as exc:
             messagebox.showerror("Load Error", str(exc))
 
@@ -2181,17 +2571,9 @@ class TwisterGui(Tk):
         path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
         if not path:
             return
-        self._apply_encoder_fields_to_model()
-        for key in GLOBAL_TAGS:
-            self.profile.globals[key] = clamp7(self.global_fields[key].get())
-        data = {
-            "mode": "everything-bundle",
-            "version": 1,
-            "profile": self.profile.to_json_dict(),
-            "named_presets": self.named_presets,
-        }
+        data = self._portable_show_pack_payload()
         Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
-        messagebox.showinfo("Exported", f"Everything bundle exported to:\n{path}")
+        messagebox.showinfo("Exported", f"Portable show pack exported to:\n{path}")
 
     def import_everything_bundle(self) -> None:
         path = filedialog.askopenfilename(filetypes=[("JSON", "*.json"), ("All Files", "*")])
@@ -2199,19 +2581,25 @@ class TwisterGui(Tk):
             return
         try:
             raw = json.loads(Path(path).read_text(encoding="utf-8"))
-            if raw.get("mode") != "everything-bundle":
-                raise ValueError("File is not an everything-bundle export")
+            if raw.get("mode") not in {"everything-bundle", "portable-show-pack"}:
+                raise ValueError("File is not a portable show pack")
+            mismatches = self._verify_portable_show_pack(raw)
+            if mismatches and not messagebox.askyesno(
+                "Checksum Warning",
+                "Show pack integrity checks failed:\n\n" + "\n".join(mismatches) + "\n\nImport anyway?",
+            ):
+                return
             self._push_history()
             self.profile = Profile.from_json_dict(raw.get("profile", {}))
-            presets_data = raw.get("named_presets", {})
-            self.named_presets = presets_data if isinstance(presets_data, dict) else {}
+            self.named_presets = self._sanitize_named_presets(raw.get("named_presets", {}))
             self._save_named_presets()
             for key in GLOBAL_TAGS:
                 self.global_fields[key].set(self.profile.globals.get(key, 0))
             self._load_encoder_fields_from_model()
             self._draw_knob_grid()
             self._draw_mini_map()
-            messagebox.showinfo("Imported", f"Everything bundle imported from:\n{path}")
+            self._update_metadata_summary()
+            messagebox.showinfo("Imported", f"Portable show pack imported from:\n{path}")
         except Exception as exc:
             messagebox.showerror("Import Error", str(exc))
 
@@ -2221,6 +2609,7 @@ class TwisterGui(Tk):
             return
         self._apply_encoder_fields_to_model()
         self._sync_globals_from_ui()
+        self._mark_profile_updated()
         Path(path).write_text(json.dumps(self.profile.to_json_dict(), indent=2), encoding="utf-8")
         messagebox.showinfo("Saved", f"Profile written to:\n{path}")
 

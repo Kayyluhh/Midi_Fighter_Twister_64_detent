@@ -1,0 +1,14 @@
+{
+  "name": "Bitwig Studio",
+  "scope": "selected-bank",
+  "notes": [
+    "Bitwig works well with relative encoders for device macros and sends.",
+    "Keep switch MIDI numbers aligned with encoder numbers for easier controller script authoring.",
+    "Use tags in profile metadata to mark scene, mixer, and device banks separately."
+  ],
+  "setup_steps": [
+    "Create a Generic Flexi controller or custom controller extension in Bitwig.",
+    "Assign encoder and switch CC data using the mapping summary from the export.",
+    "If using relative mode, choose the relative scheme that matches your Twister firmware settings."
+  ]
+}
