@@ -2,6 +2,7 @@ import json
 import queue
 import random
 import time
+from datetime import datetime
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from tkinter import BOTH, LEFT, X, Y, BooleanVar, Canvas, IntVar, StringVar, Text, Tk, Toplevel, filedialog, messagebox
@@ -388,6 +389,8 @@ class TwisterGui(Tk):
         self.clipboard_slot_var = IntVar(value=1)
         self.clipboard_slots: dict[int, EncoderConfig | None] = {1: None, 2: None, 3: None, 4: None}
         self.preset_file = Path(__file__).with_name("presets.json")
+        self.backup_dir = Path(__file__).with_name("backups")
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.named_presets: dict[str, dict] = self._load_named_presets()
         self.preset_name_var = StringVar(value="")
         self.preset_select_var = StringVar(value="")
@@ -1289,6 +1292,30 @@ class TwisterGui(Tk):
         start = bank * ENCODERS_PER_BANK
         return [start + i for i in range(ENCODERS_PER_BANK)]
 
+    def _sync_globals_from_ui(self) -> None:
+        for key in GLOBAL_TAGS:
+            self.profile.globals[key] = clamp7(self.global_fields[key].get())
+
+    def _snapshot_payload(self, label: str, targets: list[int]) -> dict:
+        return {
+            "mode": "auto-backup-snapshot",
+            "version": 1,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "label": label,
+            "target_encoders": [int(i) for i in targets],
+            "profile": self.profile.to_json_dict(),
+            "named_presets": self.named_presets,
+        }
+
+    def _write_auto_backup_snapshot(self, label: str, targets: list[int]) -> Path:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_label = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in label.lower()).strip("_")
+        name = f"snapshot_{stamp}_{safe_label or 'send'}.json"
+        path = self.backup_dir / name
+        payload = self._snapshot_payload(label, targets)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return path
+
     def _confirm_bulk_send(self, targets: list[int], label: str) -> bool:
         if self.dry_run_var.get():
             self.show_diff_window(targets, f"Dry Run: {label}")
@@ -1300,9 +1327,10 @@ class TwisterGui(Tk):
 
     def push_global(self) -> None:
         try:
-            for key in GLOBAL_TAGS:
-                self.profile.globals[key] = clamp7(self.global_fields[key].get())
+            self._sync_globals_from_ui()
+            snapshot_path = self._write_auto_backup_snapshot("push_global", list(range(TOTAL_ENCODERS)))
             self.client.push_global_config(self.profile.globals)
+            self.status_var.set(f"Global push complete. Backup: {snapshot_path.name}")
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
 
@@ -1318,12 +1346,15 @@ class TwisterGui(Tk):
     def push_bank(self) -> None:
         try:
             self._apply_encoder_fields_to_model()
+            self._sync_globals_from_ui()
             bank = max(1, min(NUM_BANKS, int(self.bank_var.get()))) - 1
             targets = self._target_indices_for_bank(bank)
             if not self._confirm_bulk_send(targets, f"Push Bank {bank + 1}"):
                 return
+            snapshot_path = self._write_auto_backup_snapshot(f"push_bank_{bank + 1}", targets)
             for idx in targets:
                 self.client.push_encoder(idx + 1, self.profile.encoders[idx])
+            self.status_var.set(f"Bank {bank + 1} push complete. Backup: {snapshot_path.name}")
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
 
@@ -1338,22 +1369,28 @@ class TwisterGui(Tk):
     def push_all_banks(self) -> None:
         try:
             self._apply_encoder_fields_to_model()
+            self._sync_globals_from_ui()
             targets = list(range(TOTAL_ENCODERS))
             if not self._confirm_bulk_send(targets, "Push All Banks"):
                 return
+            snapshot_path = self._write_auto_backup_snapshot("push_all_banks", targets)
             for idx in targets:
                 self.client.push_encoder(idx + 1, self.profile.encoders[idx])
+            self.status_var.set(f"All-bank push complete. Backup: {snapshot_path.name}")
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
 
     def push_selected_encoder(self) -> None:
         try:
             self._apply_encoder_fields_to_model()
+            self._sync_globals_from_ui()
             targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
             if not self._confirm_bulk_send(targets, "Send Selected"):
                 return
+            snapshot_path = self._write_auto_backup_snapshot("push_selected", targets)
             for idx in targets:
                 self.client.push_encoder(idx + 1, self.profile.encoders[idx])
+            self.status_var.set(f"Selected send complete. Backup: {snapshot_path.name}")
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
 
@@ -1486,8 +1523,7 @@ class TwisterGui(Tk):
         if not path:
             return
         self._apply_encoder_fields_to_model()
-        for key in GLOBAL_TAGS:
-            self.profile.globals[key] = clamp7(self.global_fields[key].get())
+        self._sync_globals_from_ui()
         Path(path).write_text(json.dumps(self.profile.to_json_dict(), indent=2), encoding="utf-8")
         messagebox.showinfo("Saved", f"Profile written to:\n{path}")
 
