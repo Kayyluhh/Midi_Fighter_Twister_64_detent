@@ -8,6 +8,7 @@ Desktop app for configuring Midi Fighter Twister profiles and LED colors via MID
 - Pull and push global settings through Twister SysEx command 0x01/0x02.
 - Pull and push per-encoder settings for a whole bank (16 encoders) via bulk transfer command 0x04.
 - Pull and push all banks (all 64 encoders) in one action.
+- Live MIDI monitor for outgoing and incoming SysEx activity.
 - Automatic pre-send snapshots for push actions (saved under `backups/`).
 - One-click restore of the latest snapshot, with optional immediate push to device.
 - Graphical 4x4 Twister-style bank view with per-knob color preview.
@@ -70,7 +71,8 @@ python3 app.py
 7. Use Preview Diff to inspect changes vs last pulled hardware state.
 8. Send Selected, Push Bank, or Push All Banks (supports Dry Run and confirmation threshold).
 9. Use `Restore Last Snapshot` for quick rollback if needed.
-10. Save full JSON or export a bank snippet JSON.
+10. Open `MIDI Monitor` to inspect SysEx TX/RX stream.
+11. Save full JSON or export a bank snippet JSON.
 
 ## Everything Bundle
 

@@ -26,7 +26,7 @@ Any agent continuing work should start here and update status/logs before and af
 1. Setup Wizard - planned
 2. Device Snapshot + Auto-Backup - done
 3. One-Click Restore Point - done
-4. Live MIDI Activity Monitor - planned
+4. Live MIDI Activity Monitor - done
 5. Conflict or Drift Warning - done
 6. Smart Validation Rules - done
 7. Performance Mode (smart batching/throttling) - planned
@@ -221,5 +221,6 @@ After coding:
 - Implemented Feature 3: one-click restore from latest snapshot with optional immediate push.
 - Implemented Feature 5: preflight drift detection re-pulls targets and warns before overwrite.
 - Implemented Feature 6: smart send validation with blocking errors and confirmable warnings.
-- Next immediate implementation target: Phase 2 features 4 and 25.
+- Implemented Feature 4: live MIDI monitor window with SysEx TX/RX stream summary.
+- Next immediate implementation target: Phase 2 feature 25.
 - Validation pending for firmware build in this session.
