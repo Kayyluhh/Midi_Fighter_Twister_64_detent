@@ -473,6 +473,7 @@ class TwisterGui(Tk):
         ttk.Button(toolbar, text="Load JSON", command=self.load_json).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Save JSON", command=self.save_json).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Restore Last Snapshot", command=self.restore_last_snapshot).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Export Diagnostics", command=self.export_diagnostics_report).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Import Bundle", command=self.import_everything_bundle).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Export Everything", command=self.export_everything_bundle).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Import Bank Snippet", command=self.import_bank_snippet).pack(side=LEFT, padx=4)
@@ -1846,6 +1847,47 @@ class TwisterGui(Tk):
             win.destroy()
 
         win.protocol("WM_DELETE_WINDOW", _on_close)
+
+    def _diagnostics_payload(self) -> dict:
+        return {
+            "mode": "diagnostics-report",
+            "version": 1,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "app": {
+                "title": "Midi Fighter Twister Profile + RGB GUI",
+                "connected": bool(self.client.connected),
+                "selected_bank": int(self.bank_var.get()),
+                "selected_encoder": int(self.encoder_var.get()),
+            },
+            "midi": {
+                "input_port": self.input_port_var.get(),
+                "output_port": self.output_port_var.get(),
+                "available_inputs": TwisterMidiClient.list_input_ports(),
+                "available_outputs": TwisterMidiClient.list_output_ports(),
+            },
+            "safety": {
+                "dry_run": bool(self.dry_run_var.get()),
+                "confirm_threshold": int(self.confirm_threshold_var.get()),
+            },
+            "globals": self.profile.globals,
+            "recent_midi_log": self.midi_log_lines[-200:],
+        }
+
+    def export_diagnostics_report(self) -> None:
+        default_name = f"twister_diagnostics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            initialfile=default_name,
+            filetypes=[("JSON", "*.json")],
+        )
+        if not path:
+            return
+        try:
+            payload = self._diagnostics_payload()
+            Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            messagebox.showinfo("Diagnostics Exported", f"Diagnostics report written to:\n{path}")
+        except Exception as exc:
+            messagebox.showerror("Diagnostics Error", str(exc))
 
     def _handle_global_sysex(self, payload: list[int]) -> None:
         if not payload:
