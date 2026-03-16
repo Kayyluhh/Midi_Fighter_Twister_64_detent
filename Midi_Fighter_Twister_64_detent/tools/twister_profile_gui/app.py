@@ -1313,6 +1313,87 @@ class TwisterGui(Tk):
             time.sleep(0.01)
         return False
 
+    def _wizard_port_dialog(self) -> bool:
+        """Show a modal MIDI port-selection step for the Setup Wizard.
+
+        Returns True if the user confirmed their selection, False if cancelled.
+        """
+        confirmed: list[bool] = [False]
+
+        dlg = Toplevel(self)
+        dlg.title("Setup Wizard — Select MIDI Ports")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+        dlg.focus_set()
+
+        in_var = StringVar(value=self.input_port_var.get())
+        out_var = StringVar(value=self.output_port_var.get())
+
+        pad = {"padx": 10, "pady": 6}
+
+        ttk.Label(dlg, text="Select the MIDI ports for your Midi Fighter Twister:").grid(
+            row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(12, 4)
+        )
+
+        ttk.Label(dlg, text="MIDI Input:").grid(row=1, column=0, sticky="e", **pad)
+        in_combo = ttk.Combobox(dlg, textvariable=in_var, width=44, state="readonly")
+        in_combo.grid(row=1, column=1, columnspan=2, sticky="ew", **pad)
+
+        ttk.Label(dlg, text="MIDI Output:").grid(row=2, column=0, sticky="e", **pad)
+        out_combo = ttk.Combobox(dlg, textvariable=out_var, width=44, state="readonly")
+        out_combo.grid(row=2, column=1, columnspan=2, sticky="ew", **pad)
+
+        def _refresh() -> None:
+            inputs = self.client.list_input_ports()
+            outputs = self.client.list_output_ports()
+            in_combo["values"] = inputs
+            out_combo["values"] = outputs
+            if inputs and not in_var.get():
+                in_var.set(inputs[0])
+            elif inputs and in_var.get() not in inputs:
+                in_var.set(inputs[0])
+            if outputs and not out_var.get():
+                out_var.set(outputs[0])
+            elif outputs and out_var.get() not in outputs:
+                out_var.set(outputs[0])
+
+        _refresh()
+
+        ttk.Button(dlg, text="Refresh Ports", command=_refresh).grid(
+            row=3, column=0, columnspan=3, pady=(2, 8)
+        )
+
+        ttk.Separator(dlg, orient="horizontal").grid(
+            row=4, column=0, columnspan=3, sticky="ew", padx=10
+        )
+
+        btn_frame = ttk.Frame(dlg)
+        btn_frame.grid(row=5, column=0, columnspan=3, pady=10)
+
+        def _ok() -> None:
+            if not in_var.get() or not out_var.get():
+                messagebox.showwarning(
+                    "Setup Wizard", "Please select both an input and output port.", parent=dlg
+                )
+                return
+            self.input_port_var.set(in_var.get())
+            self.output_port_var.set(out_var.get())
+            # keep main combos in sync
+            self.input_combo.set(in_var.get())
+            self.output_combo.set(out_var.get())
+            confirmed[0] = True
+            dlg.destroy()
+
+        def _cancel() -> None:
+            dlg.destroy()
+
+        ttk.Button(btn_frame, text="Continue", command=_ok, width=14).pack(side="left", padx=6)
+        ttk.Button(btn_frame, text="Cancel", command=_cancel, width=14).pack(side="left", padx=6)
+
+        dlg.protocol("WM_DELETE_WINDOW", _cancel)
+        self.wait_window(dlg)
+        return confirmed[0]
+
     def open_setup_wizard(self, force: bool = False) -> None:
         if self.wizard_completed and not force:
             return
@@ -1344,14 +1425,8 @@ class TwisterGui(Tk):
         if not messagebox.askyesno("Setup Wizard", intro):
             return
 
-        messagebox.showinfo(
-            "Setup Wizard",
-            (
-                "Verify the selected ports in the MIDI Connection section.\n\n"
-                f"Input: {self.input_port_var.get()}\n"
-                f"Output: {self.output_port_var.get()}"
-            ),
-        )
+        if not self._wizard_port_dialog():
+            return
 
         try:
             if not self.client.connected:
