@@ -491,6 +491,7 @@ class TwisterGui(Tk):
         ttk.Button(toolbar, text="Load JSON", command=self.load_json).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Save JSON", command=self.save_json).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Compare Profile", command=self.compare_profile_file).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Merge Profile", command=self.merge_profile_file).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Restore Last Snapshot", command=self.restore_last_snapshot).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Export Diagnostics", command=self.export_diagnostics_report).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Import Bundle", command=self.import_everything_bundle).pack(side=LEFT, padx=4)
@@ -2007,6 +2008,83 @@ class TwisterGui(Tk):
             txt.configure(state="disabled")
         except Exception as exc:
             messagebox.showerror("Compare Error", str(exc))
+
+    def _merge_profile_data(self, incoming: Profile, include_globals: bool, targets: list[int], incoming_wins: bool) -> int:
+        changed = 0
+        default_profile = Profile()
+
+        if include_globals:
+            for key in GLOBAL_TAGS:
+                cur = clamp7(self.profile.globals.get(key, 0))
+                inc = clamp7(incoming.globals.get(key, cur))
+                if cur == inc:
+                    continue
+                if incoming_wins or cur == clamp7(default_profile.globals.get(key, 0)):
+                    self.profile.globals[key] = inc
+                    changed += 1
+
+        for idx in targets:
+            cur_cfg = self.profile.encoders[idx]
+            in_cfg = incoming.encoders[idx]
+            def_cfg = default_profile.encoders[idx]
+            for field_name in ENCODER_TAGS:
+                cur = clamp7(getattr(cur_cfg, field_name))
+                inc = clamp7(getattr(in_cfg, field_name))
+                if cur == inc:
+                    continue
+                default_val = clamp7(getattr(def_cfg, field_name))
+                if incoming_wins or cur == default_val:
+                    setattr(cur_cfg, field_name, inc)
+                    changed += 1
+        return changed
+
+    def merge_profile_file(self) -> None:
+        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json"), ("All Files", "*")])
+        if not path:
+            return
+        try:
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            if raw.get("mode") == "everything-bundle":
+                incoming = Profile.from_json_dict(raw.get("profile", {}))
+            else:
+                incoming = Profile.from_json_dict(raw)
+
+            scope_all = messagebox.askyesnocancel(
+                "Merge Scope",
+                (
+                    "Merge scope:\n\n"
+                    "Yes = merge globals + all encoders\n"
+                    "No = merge selected bank only\n"
+                    "Cancel = abort"
+                ),
+            )
+            if scope_all is None:
+                return
+
+            incoming_wins = messagebox.askyesnocancel(
+                "Conflict Policy",
+                (
+                    "Conflict policy:\n\n"
+                    "Yes = incoming wins on conflicts\n"
+                    "No = keep current values unless current equals defaults\n"
+                    "Cancel = abort"
+                ),
+            )
+            if incoming_wins is None:
+                return
+
+            targets = list(range(TOTAL_ENCODERS)) if scope_all else self._target_indices_for_bank(max(1, min(NUM_BANKS, int(self.bank_var.get()))) - 1)
+            self._push_history()
+            changed = self._merge_profile_data(incoming, include_globals=bool(scope_all), targets=targets, incoming_wins=bool(incoming_wins))
+
+            for key in GLOBAL_TAGS:
+                self.global_fields[key].set(self.profile.globals.get(key, 0))
+            self._load_encoder_fields_from_model()
+            self._draw_knob_grid()
+            self._draw_mini_map()
+            messagebox.showinfo("Merge Complete", f"Applied {changed} merged value change(s).")
+        except Exception as exc:
+            messagebox.showerror("Merge Error", str(exc))
 
     def _compute_heatmap_scores(self, targets: list[int]) -> dict[int, int]:
         scores: dict[int, int] = {}
