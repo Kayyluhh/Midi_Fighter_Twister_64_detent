@@ -402,6 +402,8 @@ class TwisterGui(Tk):
         self.mini_map = None
         self.selection_pulse_phase = 0
         self.selection_pulse_dir = 1
+        self.heatmap_scores: dict[int, int] = {}
+        self.heatmap_scope_var = StringVar(value="None")
         self.midi_monitor_window: Toplevel | None = None
         self.midi_monitor_text: Text | None = None
         self.midi_log_enabled = BooleanVar(value=True)
@@ -504,6 +506,9 @@ class TwisterGui(Tk):
         ttk.Button(selector, text="Load Active", command=self._load_encoder_fields_from_model).pack(side=LEFT, padx=8)
         ttk.Button(selector, text="Apply To Selected", command=self._apply_encoder_fields_to_model).pack(side=LEFT, padx=4)
         ttk.Button(selector, text="Preview Diff", command=self.preview_diff_selected).pack(side=LEFT, padx=4)
+        ttk.Button(selector, text="Heatmap Selected", command=self.preview_heatmap_selected).pack(side=LEFT, padx=4)
+        ttk.Button(selector, text="Heatmap All", command=self.preview_heatmap_all).pack(side=LEFT, padx=4)
+        ttk.Button(selector, text="Clear Heatmap", command=self.clear_heatmap).pack(side=LEFT, padx=4)
         ttk.Button(selector, text="Send Selected", command=self.push_selected_encoder).pack(side=LEFT, padx=4)
 
         safety = ttk.Frame(profile_frame)
@@ -1036,6 +1041,7 @@ class TwisterGui(Tk):
             cfg = self.profile.encoders[idx]
             led_color = self._palette_hex(cfg.active_color)
             selected = idx in self.selected_encoders
+            heat = self.heatmap_scores.get(idx, 0)
 
             if idx == active:
                 pulse = self.selection_pulse_phase
@@ -1044,6 +1050,9 @@ class TwisterGui(Tk):
             elif selected:
                 outline = "#8eb2ff"
                 width = 3
+            elif heat > 0:
+                outline = "#ff5e2f" if heat >= 5 else ("#ff8f3a" if heat >= 3 else "#ffbf55")
+                width = 2 + min(2, heat // 3)
             else:
                 outline = "#5e6677"
                 width = 2
@@ -1073,8 +1082,19 @@ class TwisterGui(Tk):
                 idx = bank * ENCODERS_PER_BANK + enc
                 x = pad_x + 20 + enc * cell_w
                 fill = self._palette_hex(self.profile.encoders[idx].active_color)
-                outline = "#f4f7ff" if idx == active else ("#8eb2ff" if idx in self.selected_encoders else "#303748")
-                width = 2 if idx == active else 1
+                heat = self.heatmap_scores.get(idx, 0)
+                if idx == active:
+                    outline = "#f4f7ff"
+                    width = 2
+                elif idx in self.selected_encoders:
+                    outline = "#8eb2ff"
+                    width = 1
+                elif heat > 0:
+                    outline = "#ff6c3a" if heat >= 5 else ("#ff9a45" if heat >= 3 else "#ffcc66")
+                    width = 1
+                else:
+                    outline = "#303748"
+                    width = 1
                 c.create_rectangle(x, y, x + cell_w - 2, y + cell_h, fill=fill, outline=outline, width=width)
 
     def _on_mini_map_click(self, event) -> None:
@@ -1656,6 +1676,40 @@ class TwisterGui(Tk):
             lines.append("Details by Encoder")
             lines.extend(encoder_blocks)
         return lines
+
+    def _compute_heatmap_scores(self, targets: list[int]) -> dict[int, int]:
+        scores: dict[int, int] = {}
+        for idx in targets:
+            cur = self.profile.encoders[idx]
+            dev = self.device_profile.encoders[idx]
+            score = 0
+            for field_name in ENCODER_TAGS:
+                a = getattr(cur, field_name)
+                b = getattr(dev, field_name)
+                if a != b:
+                    score += 1
+            if score > 0:
+                scores[idx] = score
+        return scores
+
+    def preview_heatmap_selected(self) -> None:
+        targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
+        self.heatmap_scores = self._compute_heatmap_scores(targets)
+        self.heatmap_scope_var.set("Selected")
+        self._update_knob_visuals()
+        self._draw_mini_map()
+
+    def preview_heatmap_all(self) -> None:
+        self.heatmap_scores = self._compute_heatmap_scores(list(range(TOTAL_ENCODERS)))
+        self.heatmap_scope_var.set("All")
+        self._update_knob_visuals()
+        self._draw_mini_map()
+
+    def clear_heatmap(self) -> None:
+        self.heatmap_scores = {}
+        self.heatmap_scope_var.set("None")
+        self._update_knob_visuals()
+        self._draw_mini_map()
 
     def preview_diff_selected(self) -> None:
         targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
