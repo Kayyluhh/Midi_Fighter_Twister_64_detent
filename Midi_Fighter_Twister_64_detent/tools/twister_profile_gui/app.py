@@ -1293,6 +1293,57 @@ class TwisterGui(Tk):
         start = bank * ENCODERS_PER_BANK
         return [start + i for i in range(ENCODERS_PER_BANK)]
 
+    def _validate_profile_for_send(self, targets: list[int], include_globals: bool = True) -> tuple[list[str], list[str]]:
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        if include_globals:
+            midi_channel = clamp7(self.profile.globals.get("midi_channel", 0))
+            if midi_channel > 15:
+                errors.append(f"Global midi_channel is {midi_channel}; expected 0..15 (MIDI channels 1..16).")
+
+            super_start = clamp7(self.profile.globals.get("super_start", 0))
+            super_end = clamp7(self.profile.globals.get("super_end", 0))
+            if super_start > super_end:
+                errors.append(f"Global super range is invalid: super_start ({super_start}) > super_end ({super_end}).")
+
+        for idx in targets:
+            cfg = self.profile.encoders[idx]
+            bank = idx // ENCODERS_PER_BANK + 1
+            enc = idx % ENCODERS_PER_BANK + 1
+            prefix = f"B{bank}E{enc}"
+
+            if cfg.switch_midi_channel > 15:
+                errors.append(f"{prefix}: switch_midi_channel {cfg.switch_midi_channel} out of range 0..15.")
+            if cfg.encoder_midi_channel > 15:
+                errors.append(f"{prefix}: encoder_midi_channel {cfg.encoder_midi_channel} out of range 0..15.")
+            if cfg.encoder_shift_midi_channel > 15:
+                errors.append(f"{prefix}: encoder_shift_midi_channel {cfg.encoder_shift_midi_channel} out of range 0..15.")
+
+            if cfg.indicator_display_type > 3:
+                errors.append(f"{prefix}: indicator_display_type {cfg.indicator_display_type} out of range 0..3.")
+            if cfg.movement > 2:
+                errors.append(f"{prefix}: movement {cfg.movement} out of range 0..2.")
+            if cfg.encoder_midi_type > 5:
+                errors.append(f"{prefix}: encoder_midi_type {cfg.encoder_midi_type} out of expected range 0..5.")
+
+            if cfg.has_detent == 0 and cfg.detent_color != 0:
+                warnings.append(f"{prefix}: detent_color is set ({cfg.detent_color}) while has_detent is 0.")
+
+        return errors, warnings
+
+    def _run_send_validation(self, targets: list[int], label: str, include_globals: bool = True) -> bool:
+        errors, warnings = self._validate_profile_for_send(targets, include_globals=include_globals)
+        if errors:
+            messagebox.showerror("Validation Failed", f"{label}\n\n" + "\n".join(errors[:20]))
+            return False
+        if warnings:
+            return messagebox.askyesno(
+                "Validation Warning",
+                f"{label}\n\n" + "\n".join(warnings[:20]) + "\n\nContinue anyway?",
+            )
+        return True
+
     def _capture_device_encoder_snapshot(self, targets: list[int]) -> dict[int, dict[str, int]]:
         snap: dict[int, dict[str, int]] = {}
         for idx in targets:
@@ -1440,6 +1491,8 @@ class TwisterGui(Tk):
     def push_global(self) -> None:
         try:
             self._sync_globals_from_ui()
+            if not self._run_send_validation(list(range(TOTAL_ENCODERS)), "Push Global", include_globals=True):
+                return
             snapshot_path = self._write_auto_backup_snapshot("push_global", list(range(TOTAL_ENCODERS)))
             self.client.push_global_config(self.profile.globals)
             self.status_var.set(f"Global push complete. Backup: {snapshot_path.name}")
@@ -1461,6 +1514,8 @@ class TwisterGui(Tk):
             self._sync_globals_from_ui()
             bank = max(1, min(NUM_BANKS, int(self.bank_var.get()))) - 1
             targets = self._target_indices_for_bank(bank)
+            if not self._run_send_validation(targets, f"Push Bank {bank + 1}", include_globals=True):
+                return
             if not self._confirm_bulk_send(targets, f"Push Bank {bank + 1}"):
                 return
             if not self._preflight_drift_warning(targets, f"Push Bank {bank + 1}"):
@@ -1485,6 +1540,8 @@ class TwisterGui(Tk):
             self._apply_encoder_fields_to_model()
             self._sync_globals_from_ui()
             targets = list(range(TOTAL_ENCODERS))
+            if not self._run_send_validation(targets, "Push All Banks", include_globals=True):
+                return
             if not self._confirm_bulk_send(targets, "Push All Banks"):
                 return
             if not self._preflight_drift_warning(targets, "Push All Banks"):
@@ -1501,6 +1558,8 @@ class TwisterGui(Tk):
             self._apply_encoder_fields_to_model()
             self._sync_globals_from_ui()
             targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
+            if not self._run_send_validation(targets, "Send Selected", include_globals=True):
+                return
             if not self._confirm_bulk_send(targets, "Send Selected"):
                 return
             if not self._preflight_drift_warning(targets, "Send Selected"):
