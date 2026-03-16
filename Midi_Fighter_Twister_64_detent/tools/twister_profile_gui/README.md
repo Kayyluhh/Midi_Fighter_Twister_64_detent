@@ -9,17 +9,21 @@ Desktop app for configuring Midi Fighter Twister profiles and LED colors via MID
 - Pull and push per-encoder settings for a whole bank (16 encoders) via bulk transfer command 0x04.
 - Pull and push all banks (all 64 encoders) in one action.
 - Graphical 4x4 Twister-style bank view with per-knob color preview.
+- Active knob selection pulse animation for clearer focus while editing.
 - Bank tabs and a 64-encoder mini map for quick navigation.
 - Multi-select editing support: click, drag-box, Shift-add range, and Cmd-toggle.
 - One-click quick selection: active row, active column, or all 16 knobs in bank.
 - Apply scope selector: All Fields, Colors Only, MIDI Only, Behavior Only.
 - Named presets and 4 clipboard slots.
+- Preset import/export for sharing preset libraries between machines.
 - Undo/Redo with keyboard shortcuts (`Cmd+Z`, `Cmd+Shift+Z`).
 - Diff preview against last pulled device state.
+- Diff preview includes grouped field-change summary plus per-encoder details.
 - Dry-run mode and configurable confirmation threshold for safer bulk sends.
 - Color tools for selected knobs: gradient fill, randomize, and hue-index rotate.
 - Save and load full 64-encoder profiles as JSON.
 - Import and export bank-snippet JSON files.
+- One-click everything bundle export/import (full profile + named presets).
 - RGB picker maps full RGB color space to the nearest Twister 7-bit palette color index (0..127).
 
 ## Requirements
@@ -53,6 +57,18 @@ python3 app.py
 7. Use Preview Diff to inspect changes vs last pulled hardware state.
 8. Send Selected, Push Bank, or Push All Banks (supports Dry Run and confirmation threshold).
 9. Save full JSON or export a bank snippet JSON.
+
+## Everything Bundle
+
+- `Export Everything`: writes one JSON containing:
+- Full profile (`globals` + 64 encoders)
+- All named presets
+- `Import Bundle`: restores profile + named presets from that bundle.
+
+## Preset Sharing
+
+- `Export Presets`: saves all named presets to a JSON file (`mode: named-presets`).
+- `Import Presets`: merges presets from a named-presets JSON file into your local preset library.
 
 ## Import/Export Modes
 

@@ -393,6 +393,8 @@ class TwisterGui(Tk):
         self.preset_select_var = StringVar(value="")
         self.bank_tabs = None
         self.mini_map = None
+        self.selection_pulse_phase = 0
+        self.selection_pulse_dir = 1
 
         self._build_ui()
         self.refresh_ports()
@@ -401,6 +403,7 @@ class TwisterGui(Tk):
         self._draw_knob_grid()
         self._draw_mini_map()
         self._update_context_labels()
+        self._animate_selection_pulse()
         self.after(40, self._poll_events)
 
         self.bank_var.trace_add("write", self._on_var_changed)
@@ -409,6 +412,17 @@ class TwisterGui(Tk):
         self.bind("<Command-Z>", lambda _e: self.redo())
         self.bind("<Control-z>", lambda _e: self.undo())
         self.bind("<Control-y>", lambda _e: self.redo())
+
+    def _animate_selection_pulse(self) -> None:
+        self.selection_pulse_phase += self.selection_pulse_dir
+        if self.selection_pulse_phase >= 8:
+            self.selection_pulse_phase = 8
+            self.selection_pulse_dir = -1
+        elif self.selection_pulse_phase <= 0:
+            self.selection_pulse_phase = 0
+            self.selection_pulse_dir = 1
+        self._update_knob_visuals()
+        self.after(90, self._animate_selection_pulse)
 
     def _build_ui(self) -> None:
         root = ttk.Frame(self)
@@ -448,6 +462,8 @@ class TwisterGui(Tk):
 
         ttk.Button(toolbar, text="Load JSON", command=self.load_json).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Save JSON", command=self.save_json).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Import Bundle", command=self.import_everything_bundle).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Export Everything", command=self.export_everything_bundle).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Import Bank Snippet", command=self.import_bank_snippet).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Export Bank Snippet", command=self.export_bank_snippet).pack(side=LEFT, padx=4)
         ttk.Separator(toolbar, orient="vertical").pack(side=LEFT, fill=Y, padx=10)
@@ -507,6 +523,9 @@ class TwisterGui(Tk):
         self.preset_combo.pack(side=LEFT, padx=4)
         ttk.Button(presets, text="Apply Preset To Selected", command=self.apply_named_preset).pack(side=LEFT, padx=4)
         ttk.Button(presets, text="Delete Preset", command=self.delete_named_preset).pack(side=LEFT, padx=4)
+        ttk.Separator(presets, orient="vertical").pack(side=LEFT, fill=Y, padx=8)
+        ttk.Button(presets, text="Import Presets", command=self.import_named_presets).pack(side=LEFT, padx=4)
+        ttk.Button(presets, text="Export Presets", command=self.export_named_presets).pack(side=LEFT, padx=4)
 
         tabs_wrap = ttk.Frame(profile_frame)
         tabs_wrap.pack(fill=X, padx=8, pady=(0, 6))
@@ -891,6 +910,47 @@ class TwisterGui(Tk):
             self._save_named_presets()
             self.preset_select_var.set("")
 
+    def export_named_presets(self) -> None:
+        path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        data = {
+            "mode": "named-presets",
+            "version": 1,
+            "presets": self.named_presets,
+        }
+        Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+        messagebox.showinfo("Exported", f"Presets exported to:\n{path}")
+
+    def import_named_presets(self) -> None:
+        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json"), ("All Files", "*")])
+        if not path:
+            return
+        try:
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            if raw.get("mode") != "named-presets":
+                raise ValueError("File is not a named-presets export")
+            presets = raw.get("presets", {})
+            if not isinstance(presets, dict):
+                raise ValueError("Invalid presets payload")
+
+            merged = 0
+            for name, payload in presets.items():
+                if not isinstance(name, str) or not isinstance(payload, dict):
+                    continue
+                clean: dict[str, int] = {}
+                for field_name in ENCODER_TAGS:
+                    if field_name in payload:
+                        clean[field_name] = clamp7(payload[field_name])
+                if clean:
+                    self.named_presets[name] = clean
+                    merged += 1
+
+            self._save_named_presets()
+            messagebox.showinfo("Imported", f"Imported {merged} preset(s).")
+        except Exception as exc:
+            messagebox.showerror("Import Error", str(exc))
+
     def _draw_knob_grid(self) -> None:
         if self.knob_canvas is None:
             return
@@ -957,8 +1017,9 @@ class TwisterGui(Tk):
             selected = idx in self.selected_encoders
 
             if idx == active:
-                outline = "#f4f7ff"
-                width = 4
+                pulse = self.selection_pulse_phase
+                outline = "#ffffff" if pulse >= 4 else "#dce8ff"
+                width = 3 + (pulse // 3)
             elif selected:
                 outline = "#8eb2ff"
                 width = 3
@@ -1298,6 +1359,8 @@ class TwisterGui(Tk):
 
     def _compute_diff_lines(self, targets: list[int]) -> list[str]:
         lines = []
+        field_counts: dict[str, int] = {}
+        encoder_blocks: list[str] = []
         for idx in targets:
             cur = self.profile.encoders[idx]
             dev = self.device_profile.encoders[idx]
@@ -1307,11 +1370,20 @@ class TwisterGui(Tk):
                 b = getattr(dev, field_name)
                 if a != b:
                     changed.append(f"{field_name}: {b} -> {a}")
+                    field_counts[field_name] = field_counts.get(field_name, 0) + 1
             if changed:
                 bank = idx // ENCODERS_PER_BANK + 1
                 enc = idx % ENCODERS_PER_BANK + 1
-                lines.append(f"B{bank}E{enc} (# {idx + 1})")
-                lines.extend([f"  {c}" for c in changed])
+                encoder_blocks.append(f"B{bank}E{enc} (# {idx + 1})")
+                encoder_blocks.extend([f"  {c}" for c in changed])
+
+        if field_counts:
+            lines.append("Summary (changed fields)")
+            for field_name, count in sorted(field_counts.items(), key=lambda item: (-item[1], item[0])):
+                lines.append(f"  {field_name}: {count} encoder(s)")
+            lines.append("")
+            lines.append("Details by Encoder")
+            lines.extend(encoder_blocks)
         return lines
 
     def preview_diff_selected(self) -> None:
@@ -1336,7 +1408,23 @@ class TwisterGui(Tk):
         try:
             raw = json.loads(Path(path).read_text(encoding="utf-8"))
             self._push_history()
-            if raw.get("mode") == "bank-snippet":
+            if raw.get("mode") == "everything-bundle":
+                profile_data = raw.get("profile", {})
+                presets_data = raw.get("named_presets", {})
+                self.profile = Profile.from_json_dict(profile_data)
+                if isinstance(presets_data, dict):
+                    clean_presets: dict[str, dict] = {}
+                    for name, payload in presets_data.items():
+                        if isinstance(name, str) and isinstance(payload, dict):
+                            clean = {}
+                            for field_name in ENCODER_TAGS:
+                                if field_name in payload:
+                                    clean[field_name] = clamp7(payload[field_name])
+                            if clean:
+                                clean_presets[name] = clean
+                    self.named_presets = clean_presets
+                    self._save_named_presets()
+            elif raw.get("mode") == "bank-snippet":
                 bank = max(1, min(4, int(raw.get("bank", int(self.bank_var.get())))))
                 start = (bank - 1) * ENCODERS_PER_BANK
                 for i, row in enumerate(raw.get("encoders", [])[:ENCODERS_PER_BANK]):
@@ -1354,6 +1442,44 @@ class TwisterGui(Tk):
             self._draw_mini_map()
         except Exception as exc:
             messagebox.showerror("Load Error", str(exc))
+
+    def export_everything_bundle(self) -> None:
+        path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        self._apply_encoder_fields_to_model()
+        for key in GLOBAL_TAGS:
+            self.profile.globals[key] = clamp7(self.global_fields[key].get())
+        data = {
+            "mode": "everything-bundle",
+            "version": 1,
+            "profile": self.profile.to_json_dict(),
+            "named_presets": self.named_presets,
+        }
+        Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+        messagebox.showinfo("Exported", f"Everything bundle exported to:\n{path}")
+
+    def import_everything_bundle(self) -> None:
+        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json"), ("All Files", "*")])
+        if not path:
+            return
+        try:
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            if raw.get("mode") != "everything-bundle":
+                raise ValueError("File is not an everything-bundle export")
+            self._push_history()
+            self.profile = Profile.from_json_dict(raw.get("profile", {}))
+            presets_data = raw.get("named_presets", {})
+            self.named_presets = presets_data if isinstance(presets_data, dict) else {}
+            self._save_named_presets()
+            for key in GLOBAL_TAGS:
+                self.global_fields[key].set(self.profile.globals.get(key, 0))
+            self._load_encoder_fields_from_model()
+            self._draw_knob_grid()
+            self._draw_mini_map()
+            messagebox.showinfo("Imported", f"Everything bundle imported from:\n{path}")
+        except Exception as exc:
+            messagebox.showerror("Import Error", str(exc))
 
     def save_json(self) -> None:
         path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
