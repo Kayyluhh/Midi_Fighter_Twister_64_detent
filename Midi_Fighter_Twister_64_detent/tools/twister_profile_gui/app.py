@@ -210,6 +210,7 @@ class TwisterMidiClient:
             raise RuntimeError("Not connected")
         sysex_data = MANUFACTURER_ID + [command] + [clamp7(x) for x in payload]
         self.out_port.send(mido.Message("sysex", data=sysex_data))
+        self.event_queue.put({"type": "sysex_tx", "command": command, "payload": [clamp7(x) for x in payload]})
 
     def pull_global_config(self) -> None:
         self._send_sysex(SYSEX_COMMAND_PULL_CONF, [0x00])
@@ -398,6 +399,11 @@ class TwisterGui(Tk):
         self.mini_map = None
         self.selection_pulse_phase = 0
         self.selection_pulse_dir = 1
+        self.midi_monitor_window: Toplevel | None = None
+        self.midi_monitor_text: Text | None = None
+        self.midi_log_enabled = BooleanVar(value=True)
+        self.midi_log_lines: list[str] = []
+        self.midi_log_max_lines = 800
 
         self._build_ui()
         self.refresh_ports()
@@ -445,8 +451,9 @@ class TwisterGui(Tk):
         ttk.Button(top, text="Refresh Ports", command=self.refresh_ports).grid(row=0, column=4, padx=6, pady=6)
         ttk.Button(top, text="Connect", command=self.connect).grid(row=0, column=5, padx=6, pady=6)
         ttk.Button(top, text="Disconnect", command=self.disconnect).grid(row=0, column=6, padx=6, pady=6)
+        ttk.Button(top, text="MIDI Monitor", command=self.open_midi_monitor).grid(row=0, column=7, padx=6, pady=6)
 
-        ttk.Label(top, textvariable=self.status_var).grid(row=0, column=7, padx=8, pady=6, sticky="w")
+        ttk.Label(top, textvariable=self.status_var).grid(row=0, column=8, padx=8, pady=6, sticky="w")
 
         body = ttk.Panedwindow(root, orient="horizontal")
         body.pack(fill=BOTH, expand=True)
@@ -1754,8 +1761,15 @@ class TwisterGui(Tk):
             self._handle_event(event)
 
     def _handle_event(self, event: dict) -> None:
-        if event.get("type") != "sysex":
+        event_type = event.get("type")
+        if event_type == "sysex_tx":
+            self._append_midi_log("TX", event.get("command"), event.get("payload", []))
             return
+
+        if event_type != "sysex":
+            return
+
+        self._append_midi_log("RX", event.get("command"), event.get("payload", []))
 
         command = event.get("command")
         payload = event.get("payload", [])
@@ -1764,6 +1778,74 @@ class TwisterGui(Tk):
             self._handle_global_sysex(payload)
         elif command == SYSEX_COMMAND_BULK_XFER:
             self._handle_bulk_sysex(payload)
+
+    def _command_name(self, command: int) -> str:
+        names = {
+            SYSEX_COMMAND_PUSH_CONF: "PUSH_CONF",
+            SYSEX_COMMAND_PULL_CONF: "PULL_CONF",
+            SYSEX_COMMAND_BULK_XFER: "BULK_XFER",
+        }
+        return names.get(command, f"CMD_{command}")
+
+    def _append_midi_log(self, direction: str, command: int | None, payload: list[int]) -> None:
+        if not self.midi_log_enabled.get():
+            return
+
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        cmd_val = clamp7(command if command is not None else 0)
+        head = " ".join(f"{clamp7(v):02X}" for v in payload[:16])
+        if len(payload) > 16:
+            head += " ..."
+        line = f"[{timestamp}] {direction} {self._command_name(cmd_val)} ({cmd_val:02X}) len={len(payload)} data={head}"
+
+        self.midi_log_lines.append(line)
+        if len(self.midi_log_lines) > self.midi_log_max_lines:
+            self.midi_log_lines = self.midi_log_lines[-self.midi_log_max_lines:]
+
+        if self.midi_monitor_text is not None and self.midi_monitor_window is not None and self.midi_monitor_window.winfo_exists():
+            self.midi_monitor_text.configure(state="normal")
+            self.midi_monitor_text.insert("end", line + "\n")
+            self.midi_monitor_text.see("end")
+            self.midi_monitor_text.configure(state="disabled")
+
+    def clear_midi_log(self) -> None:
+        self.midi_log_lines = []
+        if self.midi_monitor_text is not None and self.midi_monitor_window is not None and self.midi_monitor_window.winfo_exists():
+            self.midi_monitor_text.configure(state="normal")
+            self.midi_monitor_text.delete("1.0", "end")
+            self.midi_monitor_text.configure(state="disabled")
+
+    def open_midi_monitor(self) -> None:
+        if self.midi_monitor_window is not None and self.midi_monitor_window.winfo_exists():
+            self.midi_monitor_window.lift()
+            return
+
+        win = Toplevel(self)
+        win.title("MIDI Activity Monitor")
+        win.geometry("980x420")
+        self.midi_monitor_window = win
+
+        bar = ttk.Frame(win)
+        bar.pack(fill=X, padx=8, pady=6)
+        ttk.Checkbutton(bar, text="Enable Logging", variable=self.midi_log_enabled).pack(side=LEFT)
+        ttk.Button(bar, text="Clear", command=self.clear_midi_log).pack(side=LEFT, padx=8)
+        ttk.Label(bar, text="Shows outgoing and incoming Twister SysEx traffic.").pack(side=LEFT, padx=8)
+
+        txt = Text(win, wrap="none", width=140, height=24)
+        txt.pack(fill=BOTH, expand=True, padx=8, pady=(0, 8))
+        self.midi_monitor_text = txt
+
+        txt.configure(state="normal")
+        if self.midi_log_lines:
+            txt.insert("1.0", "\n".join(self.midi_log_lines) + "\n")
+        txt.configure(state="disabled")
+
+        def _on_close() -> None:
+            self.midi_monitor_window = None
+            self.midi_monitor_text = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _on_close)
 
     def _handle_global_sysex(self, payload: list[int]) -> None:
         if not payload:
