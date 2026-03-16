@@ -369,6 +369,8 @@ class TwisterGui(Tk):
         self.selection_var = StringVar(value="")
 
         self.fields: dict[str, IntVar] = {name: IntVar(value=getattr(self.profile.encoders[0], name)) for name in ENCODER_TAGS}
+        self.favorite_fields_var: dict[str, BooleanVar] = {name: BooleanVar(value=False) for name in ENCODER_TAGS}
+        self.lock_fields_var: dict[str, BooleanVar] = {name: BooleanVar(value=False) for name in ENCODER_TAGS}
         self.global_fields: dict[str, IntVar] = {name: IntVar(value=self.profile.globals[name]) for name in GLOBAL_TAGS}
 
         active = self._selected_index()
@@ -505,6 +507,7 @@ class TwisterGui(Tk):
         ttk.Combobox(selector, textvariable=self.apply_scope_var, values=list(SCOPE_FIELDS.keys()), width=14, state="readonly").pack(side=LEFT, padx=4)
         ttk.Button(selector, text="Load Active", command=self._load_encoder_fields_from_model).pack(side=LEFT, padx=8)
         ttk.Button(selector, text="Apply To Selected", command=self._apply_encoder_fields_to_model).pack(side=LEFT, padx=4)
+        ttk.Button(selector, text="Apply Favorites", command=self.apply_favorites_to_selected).pack(side=LEFT, padx=4)
         ttk.Button(selector, text="Preview Diff", command=self.preview_diff_selected).pack(side=LEFT, padx=4)
         ttk.Button(selector, text="Heatmap Selected", command=self.preview_heatmap_selected).pack(side=LEFT, padx=4)
         ttk.Button(selector, text="Heatmap All", command=self.preview_heatmap_all).pack(side=LEFT, padx=4)
@@ -594,9 +597,14 @@ class TwisterGui(Tk):
         fields_box.pack(side=LEFT, fill=BOTH, expand=True, padx=(8, 2), pady=8)
 
         row = 0
+        ttk.Label(fields_box, text="Fav").grid(row=row, column=2, sticky="w", padx=4, pady=3)
+        ttk.Label(fields_box, text="Lock").grid(row=row, column=3, sticky="w", padx=4, pady=3)
+        row += 1
         for key in ENCODER_TAGS:
             ttk.Label(fields_box, text=key).grid(row=row, column=0, sticky="w", padx=6, pady=3)
             ttk.Spinbox(fields_box, from_=0, to=127, textvariable=self.fields[key], width=10).grid(row=row, column=1, sticky="w", padx=6, pady=3)
+            ttk.Checkbutton(fields_box, variable=self.favorite_fields_var[key], takefocus=False).grid(row=row, column=2, sticky="w", padx=4, pady=3)
+            ttk.Checkbutton(fields_box, variable=self.lock_fields_var[key], takefocus=False).grid(row=row, column=3, sticky="w", padx=4, pady=3)
             row += 1
 
         color_box = ttk.LabelFrame(editor_box, text="RGB Palette Controls")
@@ -750,11 +758,22 @@ class TwisterGui(Tk):
         self._update_context_labels()
 
     def _scoped_fields(self) -> list[str]:
-        return SCOPE_FIELDS.get(self.apply_scope_var.get(), SCOPE_FIELDS["All Fields"])
+        scoped = SCOPE_FIELDS.get(self.apply_scope_var.get(), SCOPE_FIELDS["All Fields"])
+        return [name for name in scoped if not self.lock_fields_var[name].get()]
+
+    def _favorite_unlocked_fields(self) -> list[str]:
+        return [
+            name
+            for name in ENCODER_TAGS
+            if self.favorite_fields_var[name].get() and not self.lock_fields_var[name].get()
+        ]
 
     def _apply_encoder_fields_to_model(self) -> None:
         self._push_history()
         fields = self._scoped_fields()
+        if not fields:
+            messagebox.showwarning("No Editable Fields", "All scoped fields are locked.")
+            return
         targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
         for idx in targets:
             enc = self.profile.encoders[idx]
@@ -793,7 +812,12 @@ class TwisterGui(Tk):
         idx = self._selected_index()
         bank = idx // ENCODERS_PER_BANK + 1
         enc = idx % ENCODERS_PER_BANK + 1
-        self.context_var.set(f"Active Bank: {bank}   Active Encoder: {enc}   Active Tag: {idx + 1}   Scope: {self.apply_scope_var.get()}")
+        fav_count = sum(1 for name in ENCODER_TAGS if self.favorite_fields_var[name].get())
+        locked_count = sum(1 for name in ENCODER_TAGS if self.lock_fields_var[name].get())
+        self.context_var.set(
+            f"Active Bank: {bank}   Active Encoder: {enc}   Active Tag: {idx + 1}   "
+            f"Scope: {self.apply_scope_var.get()}   Favorites: {fav_count}   Locked: {locked_count}"
+        )
 
         current_bank = bank - 1
         selected_in_bank = sorted(
@@ -864,6 +888,21 @@ class TwisterGui(Tk):
                 setattr(dst, field_name, getattr(self.copied_encoder, field_name))
 
         self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def apply_favorites_to_selected(self) -> None:
+        self._push_history()
+        fields = self._favorite_unlocked_fields()
+        if not fields:
+            messagebox.showwarning("No Favorites", "No favorite fields are available to apply (or they are locked).")
+            return
+        targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
+        for idx in targets:
+            enc = self.profile.encoders[idx]
+            for key in fields:
+                setattr(enc, key, clamp7(self.fields[key].get()))
+        self._refresh_color_previews()
         self._draw_knob_grid()
         self._draw_mini_map()
 
