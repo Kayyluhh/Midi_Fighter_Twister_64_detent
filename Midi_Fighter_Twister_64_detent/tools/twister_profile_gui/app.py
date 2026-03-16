@@ -1226,9 +1226,9 @@ class TwisterGui(Tk):
         content.pack(fill=BOTH, expand=True, padx=8, pady=(0, 8))
 
         knob_box = ttk.LabelFrame(content, text="Graphical Bank View")
-        content.add(knob_box, weight=3)
+        content.add(knob_box, weight=2)
 
-        self.knob_canvas = Canvas(knob_box, width=650, height=620, bg="#121419", highlightthickness=1, highlightbackground="#40444f")
+        self.knob_canvas = Canvas(knob_box, width=560, height=620, bg="#121419", highlightthickness=1, highlightbackground="#40444f")
         self.knob_canvas.pack(fill=BOTH, expand=True, padx=8, pady=8)
         self.knob_canvas.bind("<ButtonPress-1>", self._on_knob_press)
         self.knob_canvas.bind("<B1-Motion>", self._on_knob_drag)
@@ -1241,7 +1241,7 @@ class TwisterGui(Tk):
         ttk.Label(knob_box, text=hint).pack(anchor="w", padx=10, pady=(0, 8))
 
         editor_box = ttk.LabelFrame(content, text="Encoder Settings")
-        content.add(editor_box, weight=2)
+        content.add(editor_box, weight=3)
 
         fields_box = ttk.Frame(editor_box)
         fields_box.pack(side=LEFT, fill=BOTH, expand=True, padx=(8, 2), pady=8)
@@ -2451,7 +2451,7 @@ class TwisterGui(Tk):
                     width=11,
                     outline="#3c4457",
                 )
-                txt = c.create_text(cx, cy + radius + 18, text=f"#{idx + 1}", fill="#dde6f8", font=("TkDefaultFont", 12, "bold"))
+                txt = c.create_text(cx, cy - radius - 14, text=f"{local_encoder + 1}", fill="#dde6f8", font=("TkDefaultFont", 11, "bold"))
 
                 self.knob_items[idx] = {
                     "outer": outer,
