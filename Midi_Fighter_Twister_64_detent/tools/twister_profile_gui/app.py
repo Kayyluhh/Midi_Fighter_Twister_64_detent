@@ -1,10 +1,11 @@
 import json
 import queue
+import random
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from tkinter import BOTH, LEFT, X, Y, Canvas, IntVar, StringVar, Tk, filedialog, messagebox
-from tkinter import colorchooser
+from tkinter import BOTH, LEFT, X, Y, BooleanVar, Canvas, IntVar, StringVar, Text, Tk, Toplevel, filedialog, messagebox
+from tkinter import colorchooser, simpledialog
 from tkinter import ttk
 
 import mido
@@ -59,6 +60,27 @@ ENCODER_TAGS = {
     "indicator_display_type": 22,
     "is_super_knob": 23,
     "encoder_shift_midi_channel": 24,
+}
+
+SCOPE_FIELDS = {
+    "All Fields": list(ENCODER_TAGS.keys()),
+    "Colors Only": ["active_color", "inactive_color", "detent_color"],
+    "MIDI Only": [
+        "switch_midi_channel",
+        "switch_midi_number",
+        "switch_midi_type",
+        "encoder_midi_channel",
+        "encoder_midi_number",
+        "encoder_midi_type",
+        "encoder_shift_midi_channel",
+    ],
+    "Behavior Only": [
+        "has_detent",
+        "movement",
+        "switch_action_type",
+        "indicator_display_type",
+        "is_super_knob",
+    ],
 }
 
 
@@ -326,6 +348,7 @@ class TwisterGui(Tk):
         self.events: queue.Queue = queue.Queue()
         self.client = TwisterMidiClient(self.events)
         self.profile = Profile()
+        self.device_profile = Profile.from_json_dict(self.profile.to_json_dict())
         self.palette = parse_color_map7_from_c()
 
         self.input_port_var = StringVar(value="")
@@ -333,6 +356,9 @@ class TwisterGui(Tk):
         self.status_var = StringVar(value="Disconnected")
         self.bank_var = IntVar(value=1)
         self.encoder_var = IntVar(value=1)
+        self.apply_scope_var = StringVar(value="All Fields")
+        self.dry_run_var = BooleanVar(value=False)
+        self.confirm_threshold_var = IntVar(value=12)
 
         self.context_var = StringVar(value="")
         self.selection_var = StringVar(value="")
@@ -344,6 +370,10 @@ class TwisterGui(Tk):
         self.selected_encoders: set[int] = {active}
         self.last_selected_encoder = active
         self._suppress_var_selection = False
+        self._history_lock = False
+        self.undo_stack: list[dict] = []
+        self.redo_stack: list[dict] = []
+        self.max_history = 80
 
         self.knob_canvas = None
         self.knob_items: dict[int, dict[str, int]] = {}
@@ -355,17 +385,30 @@ class TwisterGui(Tk):
         self.dragging = False
         self.drag_clicked_index: int | None = None
         self.copied_encoder: EncoderConfig | None = None
+        self.clipboard_slot_var = IntVar(value=1)
+        self.clipboard_slots: dict[int, EncoderConfig | None] = {1: None, 2: None, 3: None, 4: None}
+        self.preset_file = Path(__file__).with_name("presets.json")
+        self.named_presets: dict[str, dict] = self._load_named_presets()
+        self.preset_name_var = StringVar(value="")
+        self.preset_select_var = StringVar(value="")
+        self.bank_tabs = None
+        self.mini_map = None
 
         self._build_ui()
         self.refresh_ports()
         self._load_encoder_fields_from_model()
         self._refresh_color_previews()
         self._draw_knob_grid()
+        self._draw_mini_map()
         self._update_context_labels()
         self.after(40, self._poll_events)
 
         self.bank_var.trace_add("write", self._on_var_changed)
         self.encoder_var.trace_add("write", self._on_var_changed)
+        self.bind("<Command-z>", lambda _e: self.undo())
+        self.bind("<Command-Z>", lambda _e: self.redo())
+        self.bind("<Control-z>", lambda _e: self.undo())
+        self.bind("<Control-y>", lambda _e: self.redo())
 
     def _build_ui(self) -> None:
         root = ttk.Frame(self)
@@ -405,11 +448,18 @@ class TwisterGui(Tk):
 
         ttk.Button(toolbar, text="Load JSON", command=self.load_json).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Save JSON", command=self.save_json).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Import Bank Snippet", command=self.import_bank_snippet).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Export Bank Snippet", command=self.export_bank_snippet).pack(side=LEFT, padx=4)
+        ttk.Separator(toolbar, orient="vertical").pack(side=LEFT, fill=Y, padx=10)
+        ttk.Button(toolbar, text="Undo", command=self.undo).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Redo", command=self.redo).pack(side=LEFT, padx=4)
         ttk.Separator(toolbar, orient="vertical").pack(side=LEFT, fill=Y, padx=10)
         ttk.Button(toolbar, text="Pull Global", command=self.pull_global).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Push Global", command=self.push_global).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Pull Bank", command=self.pull_bank).pack(side=LEFT, padx=4)
         ttk.Button(toolbar, text="Push Bank", command=self.push_bank).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Pull All Banks", command=self.pull_all_banks).pack(side=LEFT, padx=4)
+        ttk.Button(toolbar, text="Push All Banks", command=self.push_all_banks).pack(side=LEFT, padx=4)
 
         selector = ttk.Frame(profile_frame)
         selector.pack(fill=X, padx=8)
@@ -418,9 +468,19 @@ class TwisterGui(Tk):
         ttk.Spinbox(selector, from_=1, to=4, width=4, textvariable=self.bank_var, command=self._on_selection_changed).pack(side=LEFT, padx=4)
         ttk.Label(selector, text="Encoder").pack(side=LEFT, padx=(14, 0))
         ttk.Spinbox(selector, from_=1, to=16, width=4, textvariable=self.encoder_var, command=self._on_selection_changed).pack(side=LEFT, padx=4)
+        ttk.Label(selector, text="Scope").pack(side=LEFT, padx=(14, 0))
+        ttk.Combobox(selector, textvariable=self.apply_scope_var, values=list(SCOPE_FIELDS.keys()), width=14, state="readonly").pack(side=LEFT, padx=4)
         ttk.Button(selector, text="Load Active", command=self._load_encoder_fields_from_model).pack(side=LEFT, padx=8)
         ttk.Button(selector, text="Apply To Selected", command=self._apply_encoder_fields_to_model).pack(side=LEFT, padx=4)
+        ttk.Button(selector, text="Preview Diff", command=self.preview_diff_selected).pack(side=LEFT, padx=4)
         ttk.Button(selector, text="Send Selected", command=self.push_selected_encoder).pack(side=LEFT, padx=4)
+
+        safety = ttk.Frame(profile_frame)
+        safety.pack(fill=X, padx=8, pady=(6, 2))
+        ttk.Checkbutton(safety, text="Dry Run", variable=self.dry_run_var).pack(side=LEFT)
+        ttk.Label(safety, text="Confirm if sending >=").pack(side=LEFT, padx=(10, 2))
+        ttk.Spinbox(safety, from_=1, to=64, width=4, textvariable=self.confirm_threshold_var).pack(side=LEFT)
+        ttk.Label(safety, text="encoders").pack(side=LEFT, padx=(4, 0))
 
         quick = ttk.Frame(profile_frame)
         quick.pack(fill=X, padx=8, pady=(6, 4))
@@ -431,6 +491,30 @@ class TwisterGui(Tk):
         ttk.Separator(quick, orient="vertical").pack(side=LEFT, fill=Y, padx=10)
         ttk.Button(quick, text="Copy Active", command=self.copy_active_encoder).pack(side=LEFT, padx=4)
         ttk.Button(quick, text="Paste To Selected", command=self.paste_to_selected).pack(side=LEFT, padx=4)
+        ttk.Separator(quick, orient="vertical").pack(side=LEFT, fill=Y, padx=10)
+        ttk.Label(quick, text="Slot").pack(side=LEFT)
+        ttk.Spinbox(quick, from_=1, to=4, width=3, textvariable=self.clipboard_slot_var).pack(side=LEFT, padx=4)
+        ttk.Button(quick, text="Copy To Slot", command=self.copy_to_slot).pack(side=LEFT, padx=4)
+        ttk.Button(quick, text="Paste Slot To Selected", command=self.paste_from_slot).pack(side=LEFT, padx=4)
+
+        presets = ttk.Frame(profile_frame)
+        presets.pack(fill=X, padx=8, pady=(0, 6))
+        ttk.Label(presets, text="Preset Name").pack(side=LEFT)
+        ttk.Entry(presets, textvariable=self.preset_name_var, width=16).pack(side=LEFT, padx=4)
+        ttk.Button(presets, text="Save Active Preset", command=self.save_named_preset).pack(side=LEFT, padx=4)
+        ttk.Separator(presets, orient="vertical").pack(side=LEFT, fill=Y, padx=8)
+        self.preset_combo = ttk.Combobox(presets, textvariable=self.preset_select_var, values=sorted(self.named_presets.keys()), width=16, state="readonly")
+        self.preset_combo.pack(side=LEFT, padx=4)
+        ttk.Button(presets, text="Apply Preset To Selected", command=self.apply_named_preset).pack(side=LEFT, padx=4)
+        ttk.Button(presets, text="Delete Preset", command=self.delete_named_preset).pack(side=LEFT, padx=4)
+
+        tabs_wrap = ttk.Frame(profile_frame)
+        tabs_wrap.pack(fill=X, padx=8, pady=(0, 6))
+        self.bank_tabs = ttk.Notebook(tabs_wrap)
+        self.bank_tabs.pack(fill=X)
+        for i in range(1, 5):
+            self.bank_tabs.add(ttk.Frame(self.bank_tabs), text=f"Bank {i}")
+        self.bank_tabs.bind("<<NotebookTabChanged>>", self._on_bank_tab_changed)
 
         context_line = ttk.Frame(profile_frame)
         context_line.pack(fill=X, padx=8, pady=(6, 4))
@@ -489,9 +573,12 @@ class TwisterGui(Tk):
         self.preview_detent.pack(padx=8)
         ttk.Button(color_box, text="Pick Detent RGB", command=lambda: self.pick_rgb_for("detent_color")).pack(pady=4)
 
-        ttk.Button(color_box, text="Refresh Swatches", command=self._refresh_color_previews).pack(pady=8)
+        ttk.Button(color_box, text="Refresh Swatches", command=self._refresh_color_previews).pack(pady=4)
+        ttk.Button(color_box, text="Gradient Fill Selected", command=self.gradient_fill_selected).pack(pady=2)
+        ttk.Button(color_box, text="Randomize Colors", command=self.randomize_selected_colors).pack(pady=2)
+        ttk.Button(color_box, text="Rotate Hue Index", command=self.rotate_selected_hue).pack(pady=4)
 
-        global_frame = ttk.LabelFrame(right, text="Global Settings")
+        global_frame = ttk.LabelFrame(right, text="Global Settings + Mini Map")
         global_frame.pack(fill=BOTH, expand=True)
 
         gr = 0
@@ -500,15 +587,22 @@ class TwisterGui(Tk):
             ttk.Spinbox(global_frame, from_=0, to=127, textvariable=self.global_fields[key], width=10).grid(row=gr, column=1, sticky="w", padx=8, pady=4)
             gr += 1
 
+        ttk.Separator(global_frame, orient="horizontal").grid(row=gr, column=0, columnspan=2, sticky="ew", padx=8, pady=8)
+        gr += 1
+        ttk.Label(global_frame, text="64 Encoder Mini Map (click to jump)").grid(row=gr, column=0, columnspan=2, sticky="w", padx=8)
+        gr += 1
+        self.mini_map = Canvas(global_frame, width=300, height=170, bg="#0f1219", highlightthickness=1, highlightbackground="#40444f")
+        self.mini_map.grid(row=gr, column=0, columnspan=2, padx=8, pady=(4, 8), sticky="ew")
+        self.mini_map.bind("<Button-1>", self._on_mini_map_click)
+
         help_box = ttk.LabelFrame(right, text="Usage")
         help_box.pack(fill=BOTH, expand=False, pady=(8, 0))
         msg = (
-            "1) Connect to Twister ports.\n"
-            "2) Pull Global and Pull Bank.\n"
-            "3) Use the graphical knobs to select one or many.\n"
-            "4) Use Row/Column/All or Copy/Paste for fast edits.\n"
-            "5) Edit values, then Apply To Selected and Send Selected.\n"
-            "6) Save JSON for reusable profiles."
+            "1) Connect to Twister ports and pull data.\n"
+            "2) Select knobs with click/drag/Shift/Cmd or quick actions.\n"
+            "3) Use scope, presets, slots, and color tools for batch edits.\n"
+            "4) Preview diff, then send selected/bank/all.\n"
+            "5) Use Dry Run and confirmation threshold for safety."
         )
         ttk.Label(help_box, text=msg, justify="left").pack(anchor="w", padx=8, pady=8)
 
@@ -545,11 +639,59 @@ class TwisterGui(Tk):
         self._suppress_var_selection = True
         self.bank_var.set(bank)
         self.encoder_var.set(encoder)
+        if self.bank_tabs is not None:
+            self.bank_tabs.select(bank - 1)
         self._suppress_var_selection = False
+
+    def _capture_state(self) -> dict:
+        return {
+            "profile": self.profile.to_json_dict(),
+            "selected": sorted(self.selected_encoders),
+            "active": self._selected_index(),
+        }
+
+    def _push_history(self) -> None:
+        if self._history_lock:
+            return
+        self.undo_stack.append(self._capture_state())
+        if len(self.undo_stack) > self.max_history:
+            self.undo_stack.pop(0)
+        self.redo_stack.clear()
+
+    def _restore_state(self, snap: dict) -> None:
+        self._history_lock = True
+        self.profile = Profile.from_json_dict(snap["profile"])
+        self.selected_encoders = set(snap.get("selected", [])) or {snap.get("active", 0)}
+        self._set_active_index(int(snap.get("active", 0)))
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+        self._history_lock = False
+
+    def undo(self) -> None:
+        if not self.undo_stack:
+            return
+        self.redo_stack.append(self._capture_state())
+        self._restore_state(self.undo_stack.pop())
+
+    def redo(self) -> None:
+        if not self.redo_stack:
+            return
+        self.undo_stack.append(self._capture_state())
+        self._restore_state(self.redo_stack.pop())
 
     def _on_var_changed(self, *_args) -> None:
         if self._suppress_var_selection:
             return
+        self._on_selection_changed()
+
+    def _on_bank_tab_changed(self, _event) -> None:
+        if self.bank_tabs is None or self._suppress_var_selection:
+            return
+        tab_idx = self.bank_tabs.index(self.bank_tabs.select())
+        self._suppress_var_selection = True
+        self.bank_var.set(tab_idx + 1)
+        self._suppress_var_selection = False
         self._on_selection_changed()
 
     def _on_selection_changed(self) -> None:
@@ -559,16 +701,23 @@ class TwisterGui(Tk):
         self.last_selected_encoder = idx
         self._load_encoder_fields_from_model()
         self._draw_knob_grid()
+        self._draw_mini_map()
         self._update_context_labels()
 
+    def _scoped_fields(self) -> list[str]:
+        return SCOPE_FIELDS.get(self.apply_scope_var.get(), SCOPE_FIELDS["All Fields"])
+
     def _apply_encoder_fields_to_model(self) -> None:
+        self._push_history()
+        fields = self._scoped_fields()
         targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
         for idx in targets:
             enc = self.profile.encoders[idx]
-            for key in ENCODER_TAGS:
+            for key in fields:
                 setattr(enc, key, clamp7(self.fields[key].get()))
         self._refresh_color_previews()
         self._draw_knob_grid()
+        self._draw_mini_map()
 
     def _load_encoder_fields_from_model(self) -> None:
         idx = self._selected_index()
@@ -599,7 +748,7 @@ class TwisterGui(Tk):
         idx = self._selected_index()
         bank = idx // ENCODERS_PER_BANK + 1
         enc = idx % ENCODERS_PER_BANK + 1
-        self.context_var.set(f"Active Bank: {bank}   Active Encoder: {enc}   Active Tag: {idx + 1}")
+        self.context_var.set(f"Active Bank: {bank}   Active Encoder: {enc}   Active Tag: {idx + 1}   Scope: {self.apply_scope_var.get()}")
 
         current_bank = bank - 1
         selected_in_bank = sorted(
@@ -625,6 +774,7 @@ class TwisterGui(Tk):
             self._set_active_index(active)
         self.last_selected_encoder = active
         self._update_knob_visuals()
+        self._draw_mini_map()
         self._update_context_labels()
 
     def select_row_from_active(self) -> None:
@@ -635,6 +785,7 @@ class TwisterGui(Tk):
         self.selected_encoders = {bank_start + row * 4 + col for col in range(4)}
         self.last_selected_encoder = idx
         self._update_knob_visuals()
+        self._draw_mini_map()
         self._update_context_labels()
 
     def select_column_from_active(self) -> None:
@@ -645,6 +796,7 @@ class TwisterGui(Tk):
         self.selected_encoders = {bank_start + row * 4 + col for row in range(4)}
         self.last_selected_encoder = idx
         self._update_knob_visuals()
+        self._draw_mini_map()
         self._update_context_labels()
 
     def copy_active_encoder(self) -> None:
@@ -658,12 +810,86 @@ class TwisterGui(Tk):
             messagebox.showwarning("Nothing Copied", "Use Copy Active first.")
             return
 
+        self._push_history()
+        fields = self._scoped_fields()
         targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
         for idx in targets:
-            self.profile.encoders[idx] = EncoderConfig(**asdict(self.copied_encoder))
+            dst = self.profile.encoders[idx]
+            for field_name in fields:
+                setattr(dst, field_name, getattr(self.copied_encoder, field_name))
 
         self._load_encoder_fields_from_model()
         self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def copy_to_slot(self) -> None:
+        slot = max(1, min(4, int(self.clipboard_slot_var.get())))
+        idx = self._selected_index()
+        self.clipboard_slots[slot] = EncoderConfig(**asdict(self.profile.encoders[idx]))
+        messagebox.showinfo("Copied", f"Copied encoder #{idx + 1} to slot {slot}.")
+
+    def paste_from_slot(self) -> None:
+        slot = max(1, min(4, int(self.clipboard_slot_var.get())))
+        src = self.clipboard_slots.get(slot)
+        if src is None:
+            messagebox.showwarning("Empty Slot", f"Clipboard slot {slot} is empty.")
+            return
+        self._push_history()
+        fields = self._scoped_fields()
+        for idx in sorted(self.selected_encoders):
+            dst = self.profile.encoders[idx]
+            for field_name in fields:
+                setattr(dst, field_name, getattr(src, field_name))
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def _load_named_presets(self) -> dict:
+        if not self.preset_file.exists():
+            return {}
+        try:
+            data = json.loads(self.preset_file.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+        return {}
+
+    def _save_named_presets(self) -> None:
+        self.preset_file.write_text(json.dumps(self.named_presets, indent=2), encoding="utf-8")
+        self.preset_combo["values"] = sorted(self.named_presets.keys())
+
+    def save_named_preset(self) -> None:
+        name = self.preset_name_var.get().strip()
+        if not name:
+            messagebox.showwarning("Preset Name", "Enter a preset name first.")
+            return
+        self.named_presets[name] = asdict(self.profile.encoders[self._selected_index()])
+        self._save_named_presets()
+        self.preset_select_var.set(name)
+
+    def apply_named_preset(self) -> None:
+        name = self.preset_select_var.get().strip()
+        if not name or name not in self.named_presets:
+            messagebox.showwarning("Preset", "Select a valid preset.")
+            return
+        self._push_history()
+        src = EncoderConfig(**self.named_presets[name])
+        fields = self._scoped_fields()
+        for idx in sorted(self.selected_encoders):
+            dst = self.profile.encoders[idx]
+            for field_name in fields:
+                setattr(dst, field_name, getattr(src, field_name))
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def delete_named_preset(self) -> None:
+        name = self.preset_select_var.get().strip()
+        if name in self.named_presets:
+            del self.named_presets[name]
+            self._save_named_presets()
+            self.preset_select_var.set("")
 
     def _draw_knob_grid(self) -> None:
         if self.knob_canvas is None:
@@ -745,6 +971,55 @@ class TwisterGui(Tk):
             c.itemconfigure(ids["inner"], fill="#141820" if not selected else "#1d2330")
             c.itemconfigure(ids["label"], fill="#ebf1ff" if selected else "#c5cedd")
 
+    def _draw_mini_map(self) -> None:
+        if self.mini_map is None:
+            return
+
+        c = self.mini_map
+        c.delete("all")
+
+        cell_w = 16
+        cell_h = 28
+        pad_x = 8
+        pad_y = 8
+        active = self._selected_index()
+
+        for bank in range(NUM_BANKS):
+            y = pad_y + bank * (cell_h + 8)
+            c.create_text(4, y + cell_h / 2, text=str(bank + 1), fill="#aeb7c8", anchor="w")
+            for enc in range(ENCODERS_PER_BANK):
+                idx = bank * ENCODERS_PER_BANK + enc
+                x = pad_x + 20 + enc * cell_w
+                fill = self._palette_hex(self.profile.encoders[idx].active_color)
+                outline = "#f4f7ff" if idx == active else ("#8eb2ff" if idx in self.selected_encoders else "#303748")
+                width = 2 if idx == active else 1
+                c.create_rectangle(x, y, x + cell_w - 2, y + cell_h, fill=fill, outline=outline, width=width)
+
+    def _on_mini_map_click(self, event) -> None:
+        cell_w = 16
+        cell_h = 28
+        pad_x = 8 + 20
+        pad_y = 8
+
+        x = event.x - pad_x
+        if x < 0:
+            return
+        col = x // cell_w
+        if col < 0 or col >= 16:
+            return
+
+        for bank in range(NUM_BANKS):
+            y = pad_y + bank * (cell_h + 8)
+            if y <= event.y <= y + cell_h:
+                idx = bank * ENCODERS_PER_BANK + int(col)
+                self.selected_encoders = {idx}
+                self.last_selected_encoder = idx
+                self._set_active_index(idx)
+                self._load_encoder_fields_from_model()
+                self._draw_knob_grid()
+                self._draw_mini_map()
+                return
+
     def _index_at_point(self, x: float, y: float) -> int | None:
         for idx, (cx, cy, radius) in self.knob_centers.items():
             dx = x - cx
@@ -815,6 +1090,7 @@ class TwisterGui(Tk):
             self.last_selected_encoder = active
             self._load_encoder_fields_from_model()
             self._update_knob_visuals()
+            self._draw_mini_map()
 
     def _on_knob_release(self, event) -> None:
         if self.knob_canvas is None:
@@ -857,6 +1133,7 @@ class TwisterGui(Tk):
         self.last_selected_encoder = idx
         self._load_encoder_fields_from_model()
         self._update_knob_visuals()
+        self._draw_mini_map()
 
     def pick_rgb_for(self, field_name: str) -> None:
         current_idx = clamp7(self.fields[field_name].get())
@@ -878,11 +1155,87 @@ class TwisterGui(Tk):
             ),
         )
 
+    def gradient_fill_selected(self) -> None:
+        targets = sorted(self.selected_encoders)
+        if not targets:
+            return
+        c1, _ = colorchooser.askcolor(title="Gradient start")
+        if not c1:
+            return
+        c2, _ = colorchooser.askcolor(title="Gradient end")
+        if not c2:
+            return
+        self._push_history()
+        sr, sg, sb = map(int, c1)
+        er, eg, eb = map(int, c2)
+        n = len(targets)
+        for i, idx in enumerate(targets):
+            t = 0 if n <= 1 else i / (n - 1)
+            r = int(sr + (er - sr) * t)
+            g = int(sg + (eg - sg) * t)
+            b = int(sb + (eb - sb) * t)
+            self.profile.encoders[idx].active_color = nearest_palette_index((r, g, b), self.palette)
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def randomize_selected_colors(self) -> None:
+        targets = sorted(self.selected_encoders)
+        if not targets:
+            return
+        low = simpledialog.askinteger("Randomize", "Min palette index", minvalue=0, maxvalue=127, initialvalue=1)
+        if low is None:
+            return
+        high = simpledialog.askinteger("Randomize", "Max palette index", minvalue=0, maxvalue=127, initialvalue=126)
+        if high is None:
+            return
+        if low > high:
+            low, high = high, low
+        self._push_history()
+        for idx in targets:
+            enc = self.profile.encoders[idx]
+            enc.active_color = random.randint(low, high)
+            enc.inactive_color = random.randint(low, high)
+            enc.detent_color = random.randint(low, high)
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def rotate_selected_hue(self) -> None:
+        targets = sorted(self.selected_encoders)
+        if not targets:
+            return
+        step = simpledialog.askinteger("Rotate", "Index step (-127..127)", minvalue=-127, maxvalue=127, initialvalue=4)
+        if step is None:
+            return
+        self._push_history()
+        for idx in targets:
+            enc = self.profile.encoders[idx]
+            enc.active_color = (enc.active_color + step) % 128
+            enc.inactive_color = (enc.inactive_color + step) % 128
+            enc.detent_color = (enc.detent_color + step) % 128
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
     def pull_global(self) -> None:
         try:
             self.client.pull_global_config()
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
+
+    def _target_indices_for_bank(self, bank: int) -> list[int]:
+        start = bank * ENCODERS_PER_BANK
+        return [start + i for i in range(ENCODERS_PER_BANK)]
+
+    def _confirm_bulk_send(self, targets: list[int], label: str) -> bool:
+        if self.dry_run_var.get():
+            self.show_diff_window(targets, f"Dry Run: {label}")
+            return False
+        threshold = max(1, int(self.confirm_threshold_var.get()))
+        if len(targets) >= threshold:
+            return messagebox.askyesno("Confirm", f"{label}: send {len(targets)} encoder(s)?")
+        return True
 
     def push_global(self) -> None:
         try:
@@ -895,9 +1248,8 @@ class TwisterGui(Tk):
     def pull_bank(self) -> None:
         try:
             bank = max(1, min(NUM_BANKS, int(self.bank_var.get()))) - 1
-            for enc in range(ENCODERS_PER_BANK):
-                sysex_tag = bank * ENCODERS_PER_BANK + enc + 1
-                self.client.pull_encoder(sysex_tag)
+            for idx in self._target_indices_for_bank(bank):
+                self.client.pull_encoder(idx + 1)
                 time.sleep(0.01)
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
@@ -906,8 +1258,29 @@ class TwisterGui(Tk):
         try:
             self._apply_encoder_fields_to_model()
             bank = max(1, min(NUM_BANKS, int(self.bank_var.get()))) - 1
-            for enc in range(ENCODERS_PER_BANK):
-                idx = bank * ENCODERS_PER_BANK + enc
+            targets = self._target_indices_for_bank(bank)
+            if not self._confirm_bulk_send(targets, f"Push Bank {bank + 1}"):
+                return
+            for idx in targets:
+                self.client.push_encoder(idx + 1, self.profile.encoders[idx])
+        except Exception as exc:
+            messagebox.showerror("MIDI Error", str(exc))
+
+    def pull_all_banks(self) -> None:
+        try:
+            for idx in range(TOTAL_ENCODERS):
+                self.client.pull_encoder(idx + 1)
+                time.sleep(0.008)
+        except Exception as exc:
+            messagebox.showerror("MIDI Error", str(exc))
+
+    def push_all_banks(self) -> None:
+        try:
+            self._apply_encoder_fields_to_model()
+            targets = list(range(TOTAL_ENCODERS))
+            if not self._confirm_bulk_send(targets, "Push All Banks"):
+                return
+            for idx in targets:
                 self.client.push_encoder(idx + 1, self.profile.encoders[idx])
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
@@ -916,10 +1289,45 @@ class TwisterGui(Tk):
         try:
             self._apply_encoder_fields_to_model()
             targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
+            if not self._confirm_bulk_send(targets, "Send Selected"):
+                return
             for idx in targets:
                 self.client.push_encoder(idx + 1, self.profile.encoders[idx])
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
+
+    def _compute_diff_lines(self, targets: list[int]) -> list[str]:
+        lines = []
+        for idx in targets:
+            cur = self.profile.encoders[idx]
+            dev = self.device_profile.encoders[idx]
+            changed = []
+            for field_name in ENCODER_TAGS:
+                a = getattr(cur, field_name)
+                b = getattr(dev, field_name)
+                if a != b:
+                    changed.append(f"{field_name}: {b} -> {a}")
+            if changed:
+                bank = idx // ENCODERS_PER_BANK + 1
+                enc = idx % ENCODERS_PER_BANK + 1
+                lines.append(f"B{bank}E{enc} (# {idx + 1})")
+                lines.extend([f"  {c}" for c in changed])
+        return lines
+
+    def preview_diff_selected(self) -> None:
+        targets = sorted(self.selected_encoders) if self.selected_encoders else [self._selected_index()]
+        self.show_diff_window(targets, "Preview Diff: Selected")
+
+    def show_diff_window(self, targets: list[int], title: str) -> None:
+        lines = self._compute_diff_lines(targets)
+        if not lines:
+            lines = ["No differences detected against the last pulled device state."]
+        win = Toplevel(self)
+        win.title(title)
+        txt = Text(win, wrap="word", width=90, height=28)
+        txt.pack(fill=BOTH, expand=True, padx=8, pady=8)
+        txt.insert("1.0", "\n".join(lines))
+        txt.configure(state="disabled")
 
     def load_json(self) -> None:
         path = filedialog.askopenfilename(filetypes=[("JSON", "*.json"), ("All Files", "*")])
@@ -927,11 +1335,23 @@ class TwisterGui(Tk):
             return
         try:
             raw = json.loads(Path(path).read_text(encoding="utf-8"))
-            self.profile = Profile.from_json_dict(raw)
+            self._push_history()
+            if raw.get("mode") == "bank-snippet":
+                bank = max(1, min(4, int(raw.get("bank", int(self.bank_var.get())))))
+                start = (bank - 1) * ENCODERS_PER_BANK
+                for i, row in enumerate(raw.get("encoders", [])[:ENCODERS_PER_BANK]):
+                    dst = self.profile.encoders[start + i]
+                    for field_name in ENCODER_TAGS:
+                        if field_name in row:
+                            setattr(dst, field_name, clamp7(row[field_name]))
+                self._set_active_index(start)
+            else:
+                self.profile = Profile.from_json_dict(raw)
             for key in GLOBAL_TAGS:
                 self.global_fields[key].set(self.profile.globals.get(key, 0))
             self._load_encoder_fields_from_model()
             self._draw_knob_grid()
+            self._draw_mini_map()
         except Exception as exc:
             messagebox.showerror("Load Error", str(exc))
 
@@ -944,6 +1364,43 @@ class TwisterGui(Tk):
             self.profile.globals[key] = clamp7(self.global_fields[key].get())
         Path(path).write_text(json.dumps(self.profile.to_json_dict(), indent=2), encoding="utf-8")
         messagebox.showinfo("Saved", f"Profile written to:\n{path}")
+
+    def export_bank_snippet(self) -> None:
+        bank = max(1, min(NUM_BANKS, int(self.bank_var.get())))
+        start = (bank - 1) * ENCODERS_PER_BANK
+        data = {
+            "mode": "bank-snippet",
+            "bank": bank,
+            "encoders": [asdict(self.profile.encoders[start + i]) for i in range(ENCODERS_PER_BANK)],
+        }
+        path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+        messagebox.showinfo("Saved", f"Bank {bank} snippet written to:\n{path}")
+
+    def import_bank_snippet(self) -> None:
+        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json"), ("All Files", "*")])
+        if not path:
+            return
+        try:
+            raw = json.loads(Path(path).read_text(encoding="utf-8"))
+            if raw.get("mode") != "bank-snippet":
+                raise ValueError("File is not a bank-snippet JSON")
+            self._push_history()
+            bank = max(1, min(4, int(raw.get("bank", int(self.bank_var.get())))))
+            start = (bank - 1) * ENCODERS_PER_BANK
+            for i, row in enumerate(raw.get("encoders", [])[:ENCODERS_PER_BANK]):
+                dst = self.profile.encoders[start + i]
+                for field_name in ENCODER_TAGS:
+                    if field_name in row:
+                        setattr(dst, field_name, clamp7(row[field_name]))
+            self._set_active_index(start)
+            self._load_encoder_fields_from_model()
+            self._draw_knob_grid()
+            self._draw_mini_map()
+        except Exception as exc:
+            messagebox.showerror("Import Error", str(exc))
 
     def _poll_events(self) -> None:
         while True:
@@ -982,8 +1439,10 @@ class TwisterGui(Tk):
 
             for name, expected_tag in GLOBAL_TAGS.items():
                 if tag == expected_tag:
-                    self.profile.globals[name] = clamp7(value)
-                    self.global_fields[name].set(self.profile.globals[name])
+                    val = clamp7(value)
+                    self.profile.globals[name] = val
+                    self.device_profile.globals[name] = val
+                    self.global_fields[name].set(val)
                     break
 
     def _handle_bulk_sysex(self, payload: list[int]) -> None:
@@ -1001,12 +1460,14 @@ class TwisterGui(Tk):
         data = payload[5:5 + size]
         idx = sysex_tag - 1
         cfg = self.profile.encoders[idx]
+        dev_cfg = self.device_profile.encoders[idx]
 
         i = 0
         while i + 1 < len(data):
             tag = data[i]
             value = data[i + 1]
             cfg.apply_tag_value(tag, value)
+            dev_cfg.apply_tag_value(tag, value)
             i += 2
 
         if idx == self._selected_index():
@@ -1015,6 +1476,7 @@ class TwisterGui(Tk):
         current_bank = self._current_bank_start() // ENCODERS_PER_BANK
         if idx // ENCODERS_PER_BANK == current_bank:
             self._update_knob_visuals()
+        self._draw_mini_map()
 
 
 if __name__ == "__main__":
