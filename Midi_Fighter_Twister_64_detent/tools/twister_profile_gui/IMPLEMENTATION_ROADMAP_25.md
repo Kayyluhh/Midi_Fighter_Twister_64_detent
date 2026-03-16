@@ -274,3 +274,14 @@ After coding:
 - Changed files: tools/twister_profile_gui/app.py, tools/twister_profile_gui/README.md, tools/twister_profile_gui/IMPLEMENTATION_ROADMAP_25.md.
 - Validation: python3 -m py_compile tools/twister_profile_gui/app.py
 - Remaining roadmap scope: none (all 25 features are now marked done).
+
+### 2026-03-16 (Packaging + Launch QA)
+- Planned scope: harden packaging workflow, verify packaged launch behavior, and leave cleaner repo status after builds.
+- Implemented packaging hardening: explicit PyInstaller hidden imports for mido/rtmidi backend and absolute venv Python resolution in build script.
+- Added release artifact helper script: tools/twister_profile_gui/build_macos_release_zip.sh.
+- Added ignore rules for packaging outputs: GUI build/, dist/, *.spec, and local presets.json.
+- Launch QA checklist:
+- Built package using build_macos_app.sh.
+- Verified packaged binary startup from dist app bundle executable.
+- Confirmed immediate startup crash fixed (previous mido.backends.rtmidi import failure resolved).
+- Changed files: .gitignore, tools/twister_profile_gui/app.py, tools/twister_profile_gui/build_macos_app.sh, tools/twister_profile_gui/build_macos_release_zip.sh, tools/twister_profile_gui/IMPLEMENTATION_ROADMAP_25.md.
