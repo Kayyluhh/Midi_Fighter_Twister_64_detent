@@ -2449,8 +2449,8 @@ class TwisterGui(Tk):
                     width=11,
                     outline="#3c4457",
                 )
-                txt = c.create_text(cx, cy + radius + 18, text=f"{local_encoder + 1}", fill="#c5cedd", font=("TkDefaultFont", 10, "bold"))
-                tag = c.create_text(cx, cy - radius - 14, text=f"#{idx + 1}", fill="#8f99ad", font=("TkDefaultFont", 9))
+                txt = c.create_text(cx, cy + radius + 20, text=f"{local_encoder + 1}", fill="#dde6f8", font=("TkDefaultFont", 13, "bold"))
+                tag = c.create_text(cx, cy - radius - 16, text=f"#{idx + 1}", fill="#c0cbe0", font=("TkDefaultFont", 11, "bold"))
 
                 self.knob_items[idx] = {
                     "outer": outer,
@@ -2492,7 +2492,8 @@ class TwisterGui(Tk):
             c.itemconfigure(ids["outer"], outline=outline, width=width)
             c.itemconfigure(ids["led"], outline=led_color)
             c.itemconfigure(ids["inner"], fill="#141820" if not selected else "#1d2330")
-            c.itemconfigure(ids["label"], fill="#ebf1ff" if selected else "#c5cedd")
+            c.itemconfigure(ids["label"], fill="#f2f6ff" if selected else "#dde6f8")
+            c.itemconfigure(ids["tag"], fill="#e0e8f8" if selected else "#c0cbe0")
 
     def _draw_mini_map(self) -> None:
         if self.mini_map is None:
