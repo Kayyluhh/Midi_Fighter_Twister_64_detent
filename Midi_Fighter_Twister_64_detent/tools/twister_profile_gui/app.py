@@ -361,6 +361,9 @@ class TwisterGui(Tk):
         self.apply_scope_var = StringVar(value="All Fields")
         self.dry_run_var = BooleanVar(value=False)
         self.confirm_threshold_var = IntVar(value=12)
+        self.performance_mode_var = BooleanVar(value=False)
+        self.performance_delay_ms_var = IntVar(value=6)
+        self.performance_retry_var = IntVar(value=1)
 
         self.context_var = StringVar(value="")
         self.selection_var = StringVar(value="")
@@ -509,6 +512,12 @@ class TwisterGui(Tk):
         ttk.Label(safety, text="Confirm if sending >=").pack(side=LEFT, padx=(10, 2))
         ttk.Spinbox(safety, from_=1, to=64, width=4, textvariable=self.confirm_threshold_var).pack(side=LEFT)
         ttk.Label(safety, text="encoders").pack(side=LEFT, padx=(4, 0))
+        ttk.Separator(safety, orient="vertical").pack(side=LEFT, fill=Y, padx=10)
+        ttk.Checkbutton(safety, text="Performance Mode", variable=self.performance_mode_var).pack(side=LEFT)
+        ttk.Label(safety, text="Delay(ms)").pack(side=LEFT, padx=(8, 2))
+        ttk.Spinbox(safety, from_=0, to=30, width=4, textvariable=self.performance_delay_ms_var).pack(side=LEFT)
+        ttk.Label(safety, text="Retry").pack(side=LEFT, padx=(8, 2))
+        ttk.Spinbox(safety, from_=0, to=3, width=3, textvariable=self.performance_retry_var).pack(side=LEFT)
 
         quick = ttk.Frame(profile_frame)
         quick.pack(fill=X, padx=8, pady=(6, 4))
@@ -1376,10 +1385,10 @@ class TwisterGui(Tk):
 
         try:
             self.client.pull_global_config()
-            time.sleep(0.01)
+            time.sleep(self._transfer_delay_seconds(0.01))
             for idx in targets:
                 self.client.pull_encoder(idx + 1)
-                time.sleep(0.006)
+                time.sleep(self._transfer_delay_seconds(0.006))
 
             deadline = time.time() + 0.75
             while time.time() < deadline:
@@ -1496,6 +1505,33 @@ class TwisterGui(Tk):
             return messagebox.askyesno("Confirm", f"{label}: send {len(targets)} encoder(s)?")
         return True
 
+    def _transfer_delay_seconds(self, normal_delay: float) -> float:
+        if self.performance_mode_var.get():
+            return max(0.0, int(self.performance_delay_ms_var.get()) / 1000.0)
+        return normal_delay
+
+    def _transfer_retries(self) -> int:
+        if not self.performance_mode_var.get():
+            return 0
+        return max(0, min(3, int(self.performance_retry_var.get())))
+
+    def _push_encoder_with_retry(self, idx: int) -> None:
+        retries = self._transfer_retries()
+        wait_s = self._transfer_delay_seconds(0.006)
+        last_exc: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                self.client.push_encoder(idx + 1, self.profile.encoders[idx])
+                return
+            except Exception as exc:
+                last_exc = exc
+                if attempt >= retries:
+                    break
+                if wait_s > 0:
+                    time.sleep(wait_s)
+        if last_exc is not None:
+            raise last_exc
+
     def push_global(self) -> None:
         try:
             self._sync_globals_from_ui()
@@ -1510,9 +1546,11 @@ class TwisterGui(Tk):
     def pull_bank(self) -> None:
         try:
             bank = max(1, min(NUM_BANKS, int(self.bank_var.get()))) - 1
+            delay_s = self._transfer_delay_seconds(0.01)
             for idx in self._target_indices_for_bank(bank):
                 self.client.pull_encoder(idx + 1)
-                time.sleep(0.01)
+                if delay_s > 0:
+                    time.sleep(delay_s)
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
 
@@ -1529,17 +1567,22 @@ class TwisterGui(Tk):
             if not self._preflight_drift_warning(targets, f"Push Bank {bank + 1}"):
                 return
             snapshot_path = self._write_auto_backup_snapshot(f"push_bank_{bank + 1}", targets)
+            delay_s = self._transfer_delay_seconds(0.006)
             for idx in targets:
-                self.client.push_encoder(idx + 1, self.profile.encoders[idx])
+                self._push_encoder_with_retry(idx)
+                if delay_s > 0:
+                    time.sleep(delay_s)
             self.status_var.set(f"Bank {bank + 1} push complete. Backup: {snapshot_path.name}")
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
 
     def pull_all_banks(self) -> None:
         try:
+            delay_s = self._transfer_delay_seconds(0.008)
             for idx in range(TOTAL_ENCODERS):
                 self.client.pull_encoder(idx + 1)
-                time.sleep(0.008)
+                if delay_s > 0:
+                    time.sleep(delay_s)
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
 
@@ -1555,8 +1598,11 @@ class TwisterGui(Tk):
             if not self._preflight_drift_warning(targets, "Push All Banks"):
                 return
             snapshot_path = self._write_auto_backup_snapshot("push_all_banks", targets)
+            delay_s = self._transfer_delay_seconds(0.004)
             for idx in targets:
-                self.client.push_encoder(idx + 1, self.profile.encoders[idx])
+                self._push_encoder_with_retry(idx)
+                if delay_s > 0:
+                    time.sleep(delay_s)
             self.status_var.set(f"All-bank push complete. Backup: {snapshot_path.name}")
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
@@ -1573,8 +1619,11 @@ class TwisterGui(Tk):
             if not self._preflight_drift_warning(targets, "Send Selected"):
                 return
             snapshot_path = self._write_auto_backup_snapshot("push_selected", targets)
+            delay_s = self._transfer_delay_seconds(0.006)
             for idx in targets:
-                self.client.push_encoder(idx + 1, self.profile.encoders[idx])
+                self._push_encoder_with_retry(idx)
+                if delay_s > 0:
+                    time.sleep(delay_s)
             self.status_var.set(f"Selected send complete. Backup: {snapshot_path.name}")
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
