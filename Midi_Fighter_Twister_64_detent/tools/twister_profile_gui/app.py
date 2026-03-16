@@ -1335,10 +1335,16 @@ class TwisterGui(Tk):
         self.input_combo["values"] = inputs
         self.output_combo["values"] = outputs
 
-        if inputs and not self.input_port_var.get():
-            self.input_port_var.set(inputs[0])
-        if outputs and not self.output_port_var.get():
-            self.output_port_var.set(outputs[0])
+        def _preferred(ports: list[str], current: str) -> str:
+            if current and current in ports:
+                return current
+            twister = next((p for p in ports if "midi fighter twister" in p.lower()), None)
+            return twister if twister else (ports[0] if ports else current)
+
+        if inputs:
+            self.input_port_var.set(_preferred(inputs, self.input_port_var.get()))
+        if outputs:
+            self.output_port_var.set(_preferred(outputs, self.output_port_var.get()))
 
     def connect(self) -> None:
         try:
@@ -1413,14 +1419,17 @@ class TwisterGui(Tk):
             outputs = self.client.list_output_ports()
             in_combo["values"] = inputs
             out_combo["values"] = outputs
-            if inputs and not in_var.get():
-                in_var.set(inputs[0])
-            elif inputs and in_var.get() not in inputs:
-                in_var.set(inputs[0])
-            if outputs and not out_var.get():
-                out_var.set(outputs[0])
-            elif outputs and out_var.get() not in outputs:
-                out_var.set(outputs[0])
+
+            def _preferred(ports: list[str], current: str) -> str:
+                if current and current in ports:
+                    return current
+                twister = next((p for p in ports if "midi fighter twister" in p.lower()), None)
+                return twister if twister else (ports[0] if ports else current)
+
+            if inputs:
+                in_var.set(_preferred(inputs, in_var.get()))
+            if outputs:
+                out_var.set(_preferred(outputs, out_var.get()))
 
         _refresh()
 
