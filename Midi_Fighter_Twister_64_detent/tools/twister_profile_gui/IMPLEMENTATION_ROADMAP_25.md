@@ -36,9 +36,9 @@ Any agent continuing work should start here and update status/logs before and af
 11. Per-Bank Color Gradients - done
 12. Rules-Based Auto-Coloring - done
 13. Advanced Multi-Edit Macros - done
-14. Relative or Absolute Conversion Assistant - planned
-15. Profile Compare Tool - planned
-16. Merge Profiles - planned
+14. Relative or Absolute Conversion Assistant - done
+15. Profile Compare Tool - done
+16. Merge Profiles - done
 17. Profile Notes and Tags - planned
 18. Templates Library - planned
 19. Plugin Host Bridge Presets - planned
@@ -229,5 +229,8 @@ After coding:
 - Implemented Feature 10: one-click color theme packs for selected/all encoders.
 - Implemented Feature 12: rules-based auto-coloring by channel, type, or CC range.
 - Implemented Feature 13: macro transforms for channels and CC spans.
-- Next immediate implementation target: Phase 3 feature 14.
+- Implemented Feature 14: conversion assistant for relative/absolute encoder mode changes.
+- Implemented Feature 15: profile compare tool for full JSON and bundle profile payloads.
+- Implemented Feature 16: merge tool with scope and conflict policy options.
+- Next immediate implementation target: Phase 4 feature 17.
 - Validation pending for firmware build in this session.
