@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from tkinter import BOTH, LEFT, X, Y, BooleanVar, Canvas, IntVar, StringVar, Text, Tk, Toplevel, filedialog, messagebox
+from tkinter import BOTH, LEFT, X, Y, BooleanVar, Canvas, IntVar, Label, StringVar, Text, Tk, Toplevel, filedialog, messagebox
 from tkinter import colorchooser, simpledialog
 from tkinter import ttk
 
@@ -542,6 +542,7 @@ class TwisterGui(Tk):
         self._load_app_settings()
 
         self._build_ui()
+        self._init_tooltips()
         self.refresh_ports()
         self._load_encoder_fields_from_model()
         self._refresh_color_previews()
@@ -581,6 +582,244 @@ class TwisterGui(Tk):
         self.bind("<Command-Z>", lambda _e: self.redo())
         self.bind("<Control-z>", lambda _e: self.undo())
         self.bind("<Control-y>", lambda _e: self.redo())
+
+    def _encoder_field_tooltip_text(self, key: str) -> str:
+        descriptions = {
+            "has_detent": "Enable the detent click zone for this encoder (0=off, 1=on).",
+            "movement": "Encoder movement mode sent by firmware (0..2).",
+            "switch_action_type": "Switch action behavior when pressing the encoder.",
+            "switch_midi_channel": "MIDI channel (0..15) for switch press messages.",
+            "switch_midi_number": "MIDI note/CC/program number for switch messages.",
+            "switch_midi_type": "Switch MIDI message type value.",
+            "encoder_midi_channel": "MIDI channel (0..15) for encoder rotation messages.",
+            "encoder_midi_number": "MIDI note/CC/program number for encoder rotation.",
+            "encoder_midi_type": "Encoder MIDI type (absolute/relative mode value).",
+            "active_color": "Palette index (0..127) used when encoder is active.",
+            "inactive_color": "Palette index (0..127) used when encoder is inactive.",
+            "detent_color": "Palette index (0..127) used for the detent indicator.",
+            "indicator_display_type": "LED ring display style value used by firmware.",
+            "is_super_knob": "Enable Super Knob behavior for this encoder.",
+            "encoder_shift_midi_channel": "MIDI channel used while shift layer is active.",
+        }
+        return descriptions.get(key, f"Edit {key} for the selected encoder(s).")
+
+    def _global_field_tooltip_text(self, key: str) -> str:
+        descriptions = {
+            "midi_channel": "Default global MIDI channel (0..15).",
+            "side_is_banked": "Enable side buttons to follow bank state.",
+            "side_func_1": "Function value for side button 1.",
+            "side_func_2": "Function value for side button 2.",
+            "side_func_3": "Function value for side button 3.",
+            "side_func_4": "Function value for side button 4.",
+            "side_func_5": "Function value for side button 5.",
+            "side_func_6": "Function value for side button 6.",
+            "super_start": "Start value for Super Knob range.",
+            "super_end": "End value for Super Knob range.",
+            "rgb_brightness": "Global RGB LED brightness level.",
+            "ind_brightness": "Global indicator ring brightness level.",
+            "soft_takeover": "Enable soft takeover behavior for mapped values.",
+            "bank_wrap_mode": "Wrap banks at edges when changing banks.",
+            "shift_page_latch": "Latch shift page behavior instead of momentary mode.",
+            "detent_size": "Detent zone size in firmware steps.",
+        }
+        return descriptions.get(key, f"Edit global parameter {key}.")
+
+    def _button_tooltip_texts(self) -> dict[str, str]:
+        return {
+            "Refresh Ports": "Scan available MIDI input/output ports.",
+            "Connect": "Open selected MIDI input and output ports.",
+            "Disconnect": "Close current MIDI connection.",
+            "MIDI Monitor": "Open live TX/RX SysEx monitor.",
+            "Setup Wizard": "Guided first-run connection and pull flow.",
+            "Load JSON": "Load a full profile JSON into the editor.",
+            "Save JSON": "Save current profile as full JSON.",
+            "Profile Metadata": "Edit profile notes, tags, and firmware target.",
+            "Compare Profile": "Compare current profile against another file.",
+            "Merge Profile": "Merge another profile into current edits.",
+            "Restore Last Snapshot": "Restore latest auto-backup snapshot.",
+            "Export Diagnostics": "Export troubleshooting report with app state.",
+            "Import Show Pack": "Import profile + presets show pack bundle.",
+            "Export Show Pack": "Export profile + presets show pack bundle.",
+            "Import Bank Snippet": "Import one-bank encoder snippet JSON.",
+            "Export Bank Snippet": "Export current bank snippet JSON.",
+            "Undo": "Undo last edit action.",
+            "Redo": "Redo previously undone action.",
+            "Pull Global": "Pull global settings from device.",
+            "Push Global": "Push global settings to device.",
+            "Pull Bank": "Pull current bank encoders from device.",
+            "Push Bank": "Push current bank encoders to device.",
+            "Pull All Banks": "Pull all 64 encoders from device.",
+            "Push All Banks": "Push all 64 encoders to device.",
+            "Load Active": "Load active encoder values into editor fields.",
+            "Apply To Selected": "Apply current editor values to selected encoders.",
+            "Apply Favorites": "Apply only favorited, unlocked fields to selection.",
+            "Preview Diff": "Show differences versus last pulled device state.",
+            "Heatmap Selected": "Visualize amount of change on selected encoders.",
+            "Heatmap All": "Visualize amount of change across all encoders.",
+            "Clear Heatmap": "Clear current heatmap overlay.",
+            "Send Selected": "Send selected encoders to hardware.",
+            "Compat Check": "Check profile values against firmware capabilities.",
+            "Recovery Mode": "Reconnect, repull, and run recovery validation.",
+            "Start Sandbox": "Start temporary edits that cannot reach hardware.",
+            "Commit Sandbox": "Keep sandbox edits and allow hardware writes.",
+            "Discard Sandbox": "Discard sandbox changes and restore base state.",
+            "Row": "Select active row in the 4x4 grid.",
+            "Column": "Select active column in the 4x4 grid.",
+            "All 16": "Select all encoders in current bank.",
+            "Copy Active": "Copy active encoder settings.",
+            "Paste To Selected": "Paste copied encoder settings to selected encoders.",
+            "Copy To Slot": "Save active encoder into clipboard slot.",
+            "Paste Slot To Selected": "Paste clipboard slot values to selected encoders.",
+            "+ MIDI Ch": "Increment MIDI channels on selected encoders.",
+            "Remap CC Span": "Remap selected encoder CC numbers to a new range.",
+            "Invert CC (127-x)": "Invert selected encoder CC numbers.",
+            "Convert Rel/Abs": "Convert selected encoders between relative/absolute modes.",
+            "Save Active Preset": "Save active encoder as a named preset.",
+            "Apply Preset To Selected": "Apply selected preset to selected encoders.",
+            "Delete Preset": "Delete selected named preset.",
+            "Import Presets": "Import named presets from JSON file.",
+            "Export Presets": "Export named presets to JSON file.",
+            "Apply Template": "Apply selected template to current bank/profile.",
+            "Import Template File": "Import and apply a template JSON file.",
+            "Refresh Templates": "Rescan built-in and imported template files.",
+            "Export Host Bridge": "Export host mapping and setup notes JSON.",
+            "Pick Active RGB": "Choose active color and map to nearest palette index.",
+            "Pick Inactive RGB": "Choose inactive color and map to nearest palette index.",
+            "Pick Detent RGB": "Choose detent color and map to nearest palette index.",
+            "Refresh Swatches": "Refresh color swatch previews from current values.",
+            "Gradient Fill Selected": "Apply gradient colors across selection.",
+            "Randomize Colors": "Randomize selected encoder colors.",
+            "Rotate Hue Index": "Rotate selected colors through palette indices.",
+            "Apply Theme To Selected": "Apply chosen theme pack to selection.",
+            "Apply Theme To All 64": "Apply chosen theme pack to all encoders.",
+            "Rule To Selected": "Apply auto-color rule to selection.",
+            "Rule To All 64": "Apply auto-color rule to all encoders.",
+            "Clear": "Clear MIDI monitor log output.",
+        }
+
+    def _init_tooltips(self) -> None:
+        self._tooltip_after_id = None
+        self._tooltip_window = None
+        self._tooltip_current_widget = None
+        self._tooltip_text_by_widget: dict[object, str] = {}
+        self._button_tooltip_map = self._button_tooltip_texts()
+        self._label_tooltip_map: dict[str, str] = {}
+        self._var_tooltip_map: dict[str, str] = {}
+
+        for key, var in self.fields.items():
+            self._label_tooltip_map[key] = self._encoder_field_tooltip_text(key)
+            self._var_tooltip_map[var._name] = self._encoder_field_tooltip_text(key)
+            self._var_tooltip_map[self.favorite_fields_var[key]._name] = f"Favorite field toggle for {key}."
+            self._var_tooltip_map[self.lock_fields_var[key]._name] = f"Lock {key} to prevent edit operations from changing it."
+
+        for key, var in self.global_fields.items():
+            self._label_tooltip_map[key] = self._global_field_tooltip_text(key)
+            self._var_tooltip_map[var._name] = self._global_field_tooltip_text(key)
+
+        self._var_tooltip_map[self.input_port_var._name] = "Selected MIDI input port from the Twister."
+        self._var_tooltip_map[self.output_port_var._name] = "Selected MIDI output port to the Twister."
+        self._var_tooltip_map[self.bank_var._name] = "Current bank number (1..4)."
+        self._var_tooltip_map[self.encoder_var._name] = "Current encoder number in bank (1..16)."
+        self._var_tooltip_map[self.apply_scope_var._name] = "Choose which field groups apply during multi-edit actions."
+        self._var_tooltip_map[self.dry_run_var._name] = "Preview changes without sending MIDI writes."
+        self._var_tooltip_map[self.confirm_threshold_var._name] = "Prompt confirmation when sending this many encoders or more."
+        self._var_tooltip_map[self.performance_mode_var._name] = "Enable paced transfer mode for more reliable bulk operations."
+        self._var_tooltip_map[self.performance_delay_ms_var._name] = "Delay between transfer operations in milliseconds."
+        self._var_tooltip_map[self.performance_retry_var._name] = "Retry count for transient transfer errors."
+        self._var_tooltip_map[self.clipboard_slot_var._name] = "Clipboard slot number (1..4)."
+        self._var_tooltip_map[self.theme_pack_var._name] = "Selected color theme pack for apply actions."
+        self._var_tooltip_map[self.auto_color_rule_var._name] = "Rule used for automatic color assignment."
+        self._var_tooltip_map[self.preset_name_var._name] = "Name used when saving a new preset."
+        self._var_tooltip_map[self.preset_select_var._name] = "Select existing preset to apply or delete."
+        self._var_tooltip_map[self.template_var._name] = "Select template to stamp bank/profile values."
+        self._var_tooltip_map[self.host_bridge_var._name] = "Select host preset profile for export."
+        self._var_tooltip_map[self.midi_log_enabled._name] = "Enable or pause live MIDI monitor logging."
+
+        self._attach_tooltips_recursive(self)
+
+    def _attach_tooltips_recursive(self, widget) -> None:
+        text = self._tooltip_text_for_widget(widget)
+        if text:
+            self._tooltip_text_by_widget[widget] = text
+            widget.bind("<Enter>", self._on_tooltip_enter, add="+")
+            widget.bind("<Leave>", self._on_tooltip_leave, add="+")
+            widget.bind("<Motion>", self._on_tooltip_motion, add="+")
+        for child in widget.winfo_children():
+            self._attach_tooltips_recursive(child)
+
+    def _tooltip_text_for_widget(self, widget) -> str | None:
+        if isinstance(widget, ttk.Button):
+            text = widget.cget("text")
+            return self._button_tooltip_map.get(text, f"Action: {text}")
+
+        if isinstance(widget, ttk.Checkbutton):
+            text = widget.cget("text")
+            if text:
+                return self._button_tooltip_map.get(text, text)
+            var_name = str(widget.cget("variable") or "")
+            return self._var_tooltip_map.get(var_name)
+
+        if isinstance(widget, ttk.Label):
+            text = widget.cget("text")
+            return self._label_tooltip_map.get(text)
+
+        if isinstance(widget, (ttk.Spinbox, ttk.Combobox, ttk.Entry)):
+            var_name = str(widget.cget("textvariable") or "")
+            return self._var_tooltip_map.get(var_name)
+
+        return None
+
+    def _on_tooltip_enter(self, event) -> None:
+        widget = event.widget
+        text = self._tooltip_text_by_widget.get(widget)
+        if not text:
+            return
+        self._tooltip_current_widget = widget
+        self._cancel_tooltip_timer()
+        self._tooltip_after_id = self.after(380, lambda: self._show_tooltip(widget, text))
+
+    def _on_tooltip_leave(self, _event) -> None:
+        self._cancel_tooltip_timer()
+        self._hide_tooltip()
+        self._tooltip_current_widget = None
+
+    def _on_tooltip_motion(self, event) -> None:
+        if self._tooltip_window is None:
+            return
+        self._tooltip_window.geometry(f"+{event.x_root + 14}+{event.y_root + 14}")
+
+    def _cancel_tooltip_timer(self) -> None:
+        if self._tooltip_after_id is not None:
+            self.after_cancel(self._tooltip_after_id)
+            self._tooltip_after_id = None
+
+    def _show_tooltip(self, widget, text: str) -> None:
+        if self._tooltip_current_widget is not widget:
+            return
+        self._hide_tooltip()
+        tip = Toplevel(self)
+        tip.wm_overrideredirect(True)
+        tip.attributes("-topmost", True)
+        Label(
+            tip,
+            text=text,
+            justify="left",
+            padx=8,
+            pady=4,
+            bg="#fffbe6",
+            fg="#1f2937",
+            relief="solid",
+            borderwidth=1,
+        ).pack(fill=BOTH, expand=True)
+        x = self.winfo_pointerx() + 14
+        y = self.winfo_pointery() + 14
+        tip.geometry(f"+{x}+{y}")
+        self._tooltip_window = tip
+
+    def _hide_tooltip(self) -> None:
+        if self._tooltip_window is not None:
+            self._tooltip_window.destroy()
+            self._tooltip_window = None
 
     def _register_keyboard_shortcuts(self) -> None:
         # Bind on all widgets so keyboard-first editing still works when controls have focus.
