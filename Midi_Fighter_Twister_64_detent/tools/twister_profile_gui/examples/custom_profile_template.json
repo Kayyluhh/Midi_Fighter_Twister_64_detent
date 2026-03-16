@@ -1,0 +1,77 @@
+{
+  "mode": "full-profile-template",
+  "schema_version": 1,
+  "metadata": {
+    "name": "Custom Profile Template",
+    "author": "Your Name",
+    "description": "Fill this file and load it in the Twister Profile GUI.",
+    "target_device": "Midi Fighter Twister",
+    "notes": [
+      "All values must be 0..127 unless noted.",
+      "Channel values are 0-based in firmware data (0 = MIDI ch 1).",
+      "indicator_display_type: 0=DOT, 1=BAR, 2=BLENDED_BAR, 3=BLENDED_DOT"
+    ]
+  },
+  "globals": {
+    "midi_channel": 4,
+    "side_is_banked": 1,
+    "side_func_1": 0,
+    "side_func_2": 0,
+    "side_func_3": 0,
+    "side_func_4": 0,
+    "side_func_5": 0,
+    "side_func_6": 0,
+    "super_start": 64,
+    "super_end": 127,
+    "rgb_brightness": 127,
+    "ind_brightness": 127,
+    "soft_takeover": 1,
+    "bank_wrap_mode": 1,
+    "shift_page_latch": 0
+  },
+  "encoders": [
+    {
+      "has_detent": 0,
+      "movement": 0,
+      "switch_action_type": 0,
+      "switch_midi_channel": 1,
+      "switch_midi_number": 0,
+      "switch_midi_type": 0,
+      "encoder_midi_channel": 1,
+      "encoder_midi_number": 0,
+      "encoder_midi_type": 1,
+      "active_color": 25,
+      "inactive_color": 0,
+      "detent_color": 63,
+      "indicator_display_type": 2,
+      "is_super_knob": 0,
+      "encoder_shift_midi_channel": 5
+    },
+    {
+      "has_detent": 0,
+      "movement": 0,
+      "switch_action_type": 0,
+      "switch_midi_channel": 1,
+      "switch_midi_number": 1,
+      "switch_midi_type": 0,
+      "encoder_midi_channel": 1,
+      "encoder_midi_number": 1,
+      "encoder_midi_type": 1,
+      "active_color": 25,
+      "inactive_color": 0,
+      "detent_color": 63,
+      "indicator_display_type": 2,
+      "is_super_knob": 0,
+      "encoder_shift_midi_channel": 5
+    }
+  ],
+  "instructions_for_agent": {
+    "required_encoder_count": 64,
+    "what_to_do": [
+      "Duplicate the encoder objects until encoders has exactly 64 items.",
+      "Set switch_midi_number and encoder_midi_number for each item as needed.",
+      "Set colors and indicator_display_type per creative direction.",
+      "Keep each numeric value in the valid 0..127 range."
+    ]
+  }
+}
