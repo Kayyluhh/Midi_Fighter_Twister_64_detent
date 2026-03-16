@@ -84,6 +84,15 @@ SCOPE_FIELDS = {
     ],
 }
 
+THEME_PACKS: dict[str, dict[str, int]] = {
+    "Classic Neon": {"active_color": 25, "inactive_color": 0, "detent_color": 63},
+    "High Contrast": {"active_color": 127, "inactive_color": 1, "detent_color": 63},
+    "Warm Sunset": {"active_color": 9, "inactive_color": 3, "detent_color": 15},
+    "Ocean Cool": {"active_color": 90, "inactive_color": 80, "detent_color": 100},
+    "Mono Stage": {"active_color": 120, "inactive_color": 40, "detent_color": 64},
+    "Colorblind Safe": {"active_color": 101, "inactive_color": 1, "detent_color": 52},
+}
+
 
 def clamp7(value: int) -> int:
     return max(0, min(127, int(value)))
@@ -364,6 +373,7 @@ class TwisterGui(Tk):
         self.performance_mode_var = BooleanVar(value=False)
         self.performance_delay_ms_var = IntVar(value=6)
         self.performance_retry_var = IntVar(value=1)
+        self.theme_pack_var = StringVar(value="Classic Neon")
 
         self.context_var = StringVar(value="")
         self.selection_var = StringVar(value="")
@@ -630,6 +640,17 @@ class TwisterGui(Tk):
         ttk.Button(color_box, text="Gradient Fill Selected", command=self.gradient_fill_selected).pack(pady=2)
         ttk.Button(color_box, text="Randomize Colors", command=self.randomize_selected_colors).pack(pady=2)
         ttk.Button(color_box, text="Rotate Hue Index", command=self.rotate_selected_hue).pack(pady=4)
+        ttk.Separator(color_box, orient="horizontal").pack(fill=X, pady=(6, 4))
+        ttk.Label(color_box, text="Theme Pack").pack(pady=(2, 2))
+        ttk.Combobox(
+            color_box,
+            textvariable=self.theme_pack_var,
+            values=list(THEME_PACKS.keys()),
+            width=18,
+            state="readonly",
+        ).pack(pady=2)
+        ttk.Button(color_box, text="Apply Theme To Selected", command=self.apply_theme_to_selected).pack(pady=2)
+        ttk.Button(color_box, text="Apply Theme To All 64", command=self.apply_theme_to_all).pack(pady=(2, 6))
 
         global_frame = ttk.LabelFrame(right, text="Global Settings + Mini Map")
         global_frame.pack(fill=BOTH, expand=True)
@@ -1355,6 +1376,36 @@ class TwisterGui(Tk):
             enc.active_color = (enc.active_color + step) % 128
             enc.inactive_color = (enc.inactive_color + step) % 128
             enc.detent_color = (enc.detent_color + step) % 128
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def _theme_values(self) -> dict[str, int]:
+        return THEME_PACKS.get(self.theme_pack_var.get(), THEME_PACKS["Classic Neon"])
+
+    def apply_theme_to_selected(self) -> None:
+        targets = sorted(self.selected_encoders)
+        if not targets:
+            return
+        self._push_history()
+        theme = self._theme_values()
+        for idx in targets:
+            enc = self.profile.encoders[idx]
+            enc.active_color = clamp7(theme["active_color"])
+            enc.inactive_color = clamp7(theme["inactive_color"])
+            enc.detent_color = clamp7(theme["detent_color"])
+        self._load_encoder_fields_from_model()
+        self._draw_knob_grid()
+        self._draw_mini_map()
+
+    def apply_theme_to_all(self) -> None:
+        self._push_history()
+        theme = self._theme_values()
+        for idx in range(TOTAL_ENCODERS):
+            enc = self.profile.encoders[idx]
+            enc.active_color = clamp7(theme["active_color"])
+            enc.inactive_color = clamp7(theme["inactive_color"])
+            enc.detent_color = clamp7(theme["detent_color"])
         self._load_encoder_fields_from_model()
         self._draw_knob_grid()
         self._draw_mini_map()
