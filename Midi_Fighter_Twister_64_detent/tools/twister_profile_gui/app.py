@@ -1,6 +1,7 @@
 import json
 import hashlib
 import io
+import os
 import queue
 import random
 import shutil
@@ -28,6 +29,10 @@ SYSEX_COMMAND_BULK_XFER = 0x04
 NUM_BANKS = 4
 ENCODERS_PER_BANK = 16
 TOTAL_ENCODERS = NUM_BANKS * ENCODERS_PER_BANK
+
+FIRMWARE_SAFE_BULK_PART_DELAY_S = 0.012
+FIRMWARE_SAFE_BULK_ENCODER_DELAY_S = 0.012
+FIRMWARE_SAFE_BULK_BANK_SETTLE_S = 0.05
 
 # Modifier bit masks observed from Tk events on desktop platforms.
 MOD_SHIFT = 0x0001
@@ -125,7 +130,7 @@ APP_SETTINGS_VERSION = 1
 APP_NAME = "Midi Fighter Twistluhh Utility"
 APP_VERSION = "2026.03.16"
 DEFAULT_PATCH_MANIFEST_URL = (
-    "https://raw.githubusercontent.com/Kayyluhh/Midi_Fighter_Twister_64_detent/main/"
+    "https://raw.githubusercontent.com/DJ-TechTools/Midi_Fighter_Twister_Open_Source/main/"
     "Midi_Fighter_Twister_64_detent/tools/twister_profile_gui/patch_manifest.json"
 )
 
@@ -347,7 +352,7 @@ class TwisterMidiClient:
         # Firmware checks length > 2 before handling pull; add a dummy byte.
         self._send_sysex(SYSEX_COMMAND_BULK_XFER, [0x01, clamp7(sysex_tag), 0x00])
 
-    def push_encoder(self, sysex_tag: int, encoder_config: EncoderConfig) -> None:
+    def push_encoder(self, sysex_tag: int, encoder_config: EncoderConfig, inter_part_delay_s: float = FIRMWARE_SAFE_BULK_PART_DELAY_S) -> None:
         pairs = encoder_config.to_tag_pairs()
 
         # Firmware supports payload size <= 24 bytes per part.
@@ -362,7 +367,8 @@ class TwisterMidiClient:
                 clamp7(len(chunk)),
             ] + chunk
             self._send_sysex(SYSEX_COMMAND_BULK_XFER, payload)
-            time.sleep(0.01)
+            if inter_part_delay_s > 0 and part_idx < total:
+                time.sleep(inter_part_delay_s)
 
 
 def find_color_map_file() -> Path | None:
@@ -486,6 +492,7 @@ class TwisterGui(Tk):
         self.performance_mode_var = BooleanVar(value=False)
         self.performance_delay_ms_var = IntVar(value=6)
         self.performance_retry_var = IntVar(value=1)
+        self.auto_sync_on_connect_var = BooleanVar(value=True)
         self.theme_pack_var = StringVar(value="Classic Neon")
         self.auto_color_rule_var = StringVar(value="By MIDI Channel")
 
@@ -587,6 +594,7 @@ class TwisterGui(Tk):
             self.performance_mode_var,
             self.performance_delay_ms_var,
             self.performance_retry_var,
+            self.auto_sync_on_connect_var,
             self.theme_pack_var,
             self.auto_color_rule_var,
             self.clipboard_slot_var,
@@ -1094,6 +1102,9 @@ class TwisterGui(Tk):
         ttk.Button(top, text="Connect", command=self.connect).grid(row=0, column=5, padx=6, pady=6)
         ttk.Button(top, text="Disconnect", command=self.disconnect).grid(row=0, column=6, padx=6, pady=6)
         ttk.Label(top, textvariable=self.status_var).grid(row=0, column=7, padx=8, pady=6, sticky="w")
+        ttk.Checkbutton(top, text="Auto Sync On Connect", variable=self.auto_sync_on_connect_var).grid(
+            row=1, column=0, columnspan=4, padx=6, pady=(0, 6), sticky="w"
+        )
 
         body = ttk.Panedwindow(root, orient="horizontal")
         body.pack(fill=BOTH, expand=True)
@@ -1352,6 +1363,15 @@ class TwisterGui(Tk):
         try:
             self.client.connect(self.input_port_var.get(), self.output_port_var.get())
             self.status_var.set("Connected")
+            if self.auto_sync_on_connect_var.get():
+                self.status_var.set("Connected. Syncing from device...")
+                self.update_idletasks()
+                try:
+                    self._pull_full_device_state()
+                    self.status_var.set("Connected and synced")
+                except Exception as exc:
+                    self.status_var.set("Connected (auto-sync failed)")
+                    messagebox.showwarning("Auto Sync", f"Connected, but auto-sync failed:\n{exc}")
         except Exception as exc:
             messagebox.showerror("Connection Error", str(exc))
 
@@ -2267,6 +2287,7 @@ class TwisterGui(Tk):
             self.performance_mode_var.set(bool(raw.get("performance_mode", self.performance_mode_var.get())))
             self.performance_delay_ms_var.set(max(0, int(raw.get("performance_delay_ms", self.performance_delay_ms_var.get()))))
             self.performance_retry_var.set(max(0, min(3, int(raw.get("performance_retry", self.performance_retry_var.get())))))
+            self.auto_sync_on_connect_var.set(bool(raw.get("auto_sync_on_connect", self.auto_sync_on_connect_var.get())))
             self.midi_log_enabled.set(bool(raw.get("midi_log_enabled", self.midi_log_enabled.get())))
             self.wizard_completed = bool(raw.get("wizard_completed", False))
 
@@ -2291,6 +2312,7 @@ class TwisterGui(Tk):
             "performance_mode": bool(self.performance_mode_var.get()),
             "performance_delay_ms": int(self.performance_delay_ms_var.get()),
             "performance_retry": int(self.performance_retry_var.get()),
+            "auto_sync_on_connect": bool(self.auto_sync_on_connect_var.get()),
             "theme_pack": self.theme_pack_var.get(),
             "auto_color_rule": self.auto_color_rule_var.get(),
             "clipboard_slot": int(self.clipboard_slot_var.get()),
@@ -3153,13 +3175,23 @@ class TwisterGui(Tk):
             return 0
         return max(0, min(3, int(self.performance_retry_var.get())))
 
+    def _bulk_part_delay_seconds(self) -> float:
+        return max(self._transfer_delay_seconds(FIRMWARE_SAFE_BULK_PART_DELAY_S), FIRMWARE_SAFE_BULK_PART_DELAY_S)
+
+    def _bulk_encoder_delay_seconds(self, normal_delay: float) -> float:
+        return max(self._transfer_delay_seconds(normal_delay), FIRMWARE_SAFE_BULK_ENCODER_DELAY_S)
+
+    def _bulk_bank_settle_seconds(self) -> float:
+        return max(self._transfer_delay_seconds(FIRMWARE_SAFE_BULK_BANK_SETTLE_S), FIRMWARE_SAFE_BULK_BANK_SETTLE_S)
+
     def _push_encoder_with_retry(self, idx: int) -> None:
         retries = self._transfer_retries()
-        wait_s = self._transfer_delay_seconds(0.006)
+        wait_s = self._bulk_encoder_delay_seconds(0.006)
+        part_delay_s = self._bulk_part_delay_seconds()
         last_exc: Exception | None = None
         for attempt in range(retries + 1):
             try:
-                self.client.push_encoder(idx + 1, self.profile.encoders[idx])
+                self.client.push_encoder(idx + 1, self.profile.encoders[idx], inter_part_delay_s=part_delay_s)
                 return
             except Exception as exc:
                 last_exc = exc
@@ -3211,7 +3243,7 @@ class TwisterGui(Tk):
             if not self._preflight_drift_warning(targets, f"Push Bank {bank + 1}"):
                 return
             snapshot_path = self._write_auto_backup_snapshot(f"push_bank_{bank + 1}", targets)
-            delay_s = self._transfer_delay_seconds(0.006)
+            delay_s = self._bulk_encoder_delay_seconds(0.006)
             for idx in targets:
                 self._push_encoder_with_retry(idx)
                 if delay_s > 0:
@@ -3246,11 +3278,19 @@ class TwisterGui(Tk):
             if not self._preflight_drift_warning(targets, "Push All Banks"):
                 return
             snapshot_path = self._write_auto_backup_snapshot("push_all_banks", targets)
-            delay_s = self._transfer_delay_seconds(0.004)
-            for idx in targets:
-                self._push_encoder_with_retry(idx)
-                if delay_s > 0:
-                    time.sleep(delay_s)
+            delay_s = self._bulk_encoder_delay_seconds(0.004)
+            bank_settle_s = self._bulk_bank_settle_seconds()
+            for bank in range(NUM_BANKS):
+                self.status_var.set(f"Push All Banks: sending bank {bank + 1} of {NUM_BANKS}...")
+                self.update_idletasks()
+                for idx in self._target_indices_for_bank(bank):
+                    self._push_encoder_with_retry(idx)
+                    if delay_s > 0:
+                        time.sleep(delay_s)
+                if bank < NUM_BANKS - 1 and bank_settle_s > 0:
+                    self.status_var.set(f"Push All Banks: bank {bank + 1} sent, settling device...")
+                    self.update_idletasks()
+                    time.sleep(bank_settle_s)
             self.status_var.set(f"All-bank push complete. Backup: {snapshot_path.name}")
         except Exception as exc:
             messagebox.showerror("MIDI Error", str(exc))
@@ -3987,7 +4027,10 @@ class TwisterGui(Tk):
             messagebox.showerror("Restart Failed", f"Patch applied, but restart failed:\n{exc}")
             return
 
-        self.destroy()
+        # Force-close the current process after spawn so patch updates are loaded reliably.
+        self.quit()
+        self.update_idletasks()
+        os._exit(0)
 
     def open_github_patcher(self) -> None:
         win = Toplevel(self)

@@ -1,6 +1,6 @@
 {
-  "version": "sample-noop-1",
-  "notes": "Sample no-op patch. Safe test payload that writes patches/README_PATCH.txt.",
-  "download_url": "https://raw.githubusercontent.com/Kayyluhh/Midi_Fighter_Twister_64_detent/main/Midi_Fighter_Twister_64_detent/tools/twister_profile_gui/patches/noop_patch.zip",
-  "sha256": "8c86dcb99ff8a684d76f32affe4b7b19d329b00754e864ccdbf699dd53cf1d52"
+  "version": "2026-03-16-hotfix-sync-restart",
+  "notes": "Hotfix: safer all-bank transfer pacing, auto sync on connect, and forced app restart after patch apply confirmation.",
+  "download_url": "https://raw.githubusercontent.com/DJ-TechTools/Midi_Fighter_Twister_Open_Source/main/Midi_Fighter_Twister_64_detent/tools/twister_profile_gui/patches/2026-03-16-hotfix-sync-restart.zip",
+  "sha256": "3782c7de6ea4c8b87c37c9321c3d1c4f84be9d14aae226cd273320390c3256bf"
 }
